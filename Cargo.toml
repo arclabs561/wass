@@ -1,0 +1,15 @@
+[package]
+name = "wass"
+version = "0.1.0"
+edition = "2021"
+description = "Optimal transport: Wasserstein distance, Sinkhorn algorithm, earth mover's distance"
+license = "MIT OR Apache-2.0"
+keywords = ["optimal-transport", "wasserstein", "sinkhorn", "earth-mover"]
+categories = ["algorithms", "science", "mathematics"]
+
+[dependencies]
+thiserror = "2.0"
+ndarray = "0.16"
+
+[dev-dependencies]
+proptest = "1.5"
