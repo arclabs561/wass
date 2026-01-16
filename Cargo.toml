@@ -1,15 +1,20 @@
 [package]
 name = "wass"
 version = "0.1.0"
+authors = ["Arc <attobop@gmail.com>"]
 edition = "2021"
 description = "Optimal transport: Wasserstein distance, Sinkhorn algorithm, earth mover's distance"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/arclabs561/wass"
 keywords = ["optimal-transport", "wasserstein", "sinkhorn", "earth-mover"]
 categories = ["algorithms", "science", "mathematics"]
 
 [dependencies]
 thiserror = "2.0"
 ndarray = "0.16"
+rand = "0.9"
+rand_chacha = "0.9"
+rand_distr = "0.5"
 
 [dev-dependencies]
 proptest = "1.5"
