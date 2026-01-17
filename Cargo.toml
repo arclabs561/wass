@@ -5,16 +5,22 @@ authors = ["Arc <attobop@gmail.com>"]
 edition = "2021"
 description = "Optimal transport: Wasserstein distance, Sinkhorn algorithm, earth mover's distance"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/arclabs561/wass"
+repository = "https://github.com/arclabs561/tekne"
+documentation = "https://docs.rs/wass"
 keywords = ["optimal-transport", "wasserstein", "sinkhorn", "earth-mover"]
 categories = ["algorithms", "science", "mathematics"]
 
 [dependencies]
-thiserror = "2.0"
-ndarray = "0.16"
-rand = "0.9"
-rand_chacha = "0.9"
-rand_distr = "0.5"
+thiserror = { workspace = true }
+ndarray = { workspace = true }
+rand = { workspace = true }
+rand_chacha = { workspace = true }
+rand_distr = { workspace = true }
+innr = { path = "../innr", optional = true }
 
 [dev-dependencies]
-proptest = "1.5"
+proptest = { workspace = true }
+
+[features]
+default = []
+simd = ["dep:innr"]
