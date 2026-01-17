@@ -76,6 +76,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bcc35a38544a891a5f7c865aca548a982ccb3b8650a5b06d0fd33a10283c56fc"
 
 [[package]]
+name = "libm"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -131,6 +137,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+ "libm",
 ]
 
 [[package]]
@@ -239,6 +246,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
 dependencies = [
  "getrandom",
+]
+
+[[package]]
+name = "rand_distr"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8615d50dcf34fa31f7ab52692afec947c4dd0ab803cc87cb3b0b4570ff7463"
+dependencies = [
+ "num-traits",
+ "rand",
 ]
 
 [[package]]
@@ -367,6 +384,9 @@ version = "0.1.0"
 dependencies = [
  "ndarray",
  "proptest",
+ "rand",
+ "rand_chacha",
+ "rand_distr",
  "thiserror",
 ]
 
@@ -410,3 +430,83 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[patch.unused]]
+name = "ans"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "axum-mcp"
+version = "0.2.0"
+
+[[patch.unused]]
+name = "axum-mcp-macros"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "clump"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "cnk"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "fynch"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "hyp"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "innr"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "jin"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "knit"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "kuji"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "lapl"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "logp"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "pare"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "rkhs"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "rmt"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "sbits"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "skel"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "slabs"
+version = "0.1.0"
+
+[[patch.unused]]
+name = "strata"
+version = "0.1.0"
