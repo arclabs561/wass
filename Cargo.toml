@@ -3,11 +3,12 @@ name = "wass"
 version = "0.1.0"
 authors = ["Arc <attobop@gmail.com>"]
 edition = "2021"
-description = "Optimal transport: Wasserstein distance, Sinkhorn algorithm, earth mover's distance"
+description = "Optimal transport: Wasserstein distance, Sinkhorn algorithm, and Sinkhorn divergence"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/arclabs561/tekne"
+repository = "https://github.com/arclabs561/wass"
+homepage = "https://github.com/arclabs561/wass"
 documentation = "https://docs.rs/wass"
-keywords = ["optimal-transport", "wasserstein", "sinkhorn", "earth-mover"]
+keywords = ["optimal-transport", "wasserstein", "sinkhorn", "divergence"]
 categories = ["algorithms", "science", "mathematics"]
 
 [dependencies]
