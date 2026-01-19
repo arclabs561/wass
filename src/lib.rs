@@ -34,7 +34,7 @@
 //! let b = array![0.5, 0.5];
 //! let (plan, distance) = sinkhorn(&a, &b, &cost, 0.1, 100);
 //!
-//! // Sinkhorn Divergence (2026 Bleeding Edge Metric)
+//! // Sinkhorn Divergence (Robust Distribution Metric)
 //! let div = sinkhorn_divergence(&a, &b, &cost, 0.1, 100);
 //! ```
 //!
@@ -66,11 +66,6 @@
 //! 3. **Marginal mismatch**: Sinkhorn assumes both margins sum to 1. Normalize inputs.
 //! 4. **Sliced approximation bias**: Fewer projections = noisier estimate.
 //! 5. **1D vs general**: [`wasserstein_1d`] only works for 1D histograms on same bins.
-//!
-//! ## Note on Production Use
-//!
-//! For comprehensive optimal transport, consider [`ruvector-math`](https://crates.io/crates/ruvector-math)
-//! which provides a more feature-complete implementation.
 //!
 //! ## References
 //!
@@ -105,6 +100,18 @@ pub enum Error {
     /// Sinkhorn algorithm did not converge within the iteration limit.
     #[error("Sinkhorn did not converge in {0} iterations")]
     SinkhornNotConverged(usize),
+
+    /// Invalid regularization parameter.
+    #[error("regularization parameter must be positive and finite, got {0}")]
+    InvalidRegularization(f32),
+
+    /// Invalid mass-variation penalty parameter for unbalanced OT.
+    #[error("mass penalty parameter must be positive and finite, got {0}")]
+    InvalidMassPenalty(f32),
+
+    /// Domain error (invalid inputs for the mathematical definition).
+    #[error("{0}")]
+    Domain(&'static str),
 }
 
 /// Result type for Optimal Transport operations.
@@ -323,8 +330,6 @@ pub fn sinkhorn_with_convergence(
     let mut v = Array1::ones(n);
 
     for iter in 0..max_iter {
-        let u_prev = u.clone();
-
         // u = a / (K v)
         let kv = k.dot(&v);
         for i in 0..m {
@@ -337,14 +342,23 @@ pub fn sinkhorn_with_convergence(
             v[j] = b[j] / (ktu[j] + EPSILON);
         }
 
-        // Check convergence
-        let diff: f32 = u
-            .iter()
-            .zip(u_prev.iter())
-            .map(|(&ui, &upi)| (ui - upi).abs())
-            .sum();
+        // Check convergence via marginal error:
+        // row_sum = diag(u) K v, col_sum = diag(v) K^T u.
+        //
+        // This matches the OT constraints and is scale-invariant.
+        let kv2 = k.dot(&v);
+        let mut max_err = 0.0f32;
+        for i in 0..m {
+            let row_sum = u[i] * kv2[i];
+            max_err = max_err.max((row_sum - a[i]).abs());
+        }
+        let ktu2 = k.t().dot(&u);
+        for j in 0..n {
+            let col_sum = v[j] * ktu2[j];
+            max_err = max_err.max((col_sum - b[j]).abs());
+        }
 
-        if diff < tol {
+        if max_err < tol {
             let mut plan = Array2::zeros((m, n));
             for i in 0..m {
                 for j in 0..n {
@@ -412,10 +426,84 @@ pub fn sinkhorn_divergence(
         let (_, ot_qq) = sinkhorn_log(b, b, cost, reg, max_iter);
         (ot_pq - 0.5 * (ot_pp + ot_qq)).max(0.0)
     } else {
-        // Warning: this fallback is mathematically biased (not a divergence).
-        // For rectangular cost, we can't compute OT(p,p) with the same matrix.
-        ot_pq 
+        // This is not Sinkhorn divergence. Use `sinkhorn_divergence_general` if you have
+        // the required self-cost matrices, or `sinkhorn_divergence_same_support` when
+        // supports match.
+        ot_pq
     }
+}
+
+/// Correct Sinkhorn divergence when `a` and `b` live on the **same support**.
+///
+/// Preconditions:
+/// - `a.len() == b.len() == n`
+/// - `cost` is square `n×n` and encodes the ground cost on that shared support
+///
+/// This is the proper de-biased entropic OT divergence from:
+/// - Feydy et al. (2018), "Interpolating between Optimal Transport and MMD using Sinkhorn Divergences"
+/// - Genevay et al. (2018), "Sample Complexity of Sinkhorn divergences"
+///
+/// Returns an error rather than silently producing a biased quantity.
+pub fn sinkhorn_divergence_same_support(
+    a: &Array1<f32>,
+    b: &Array1<f32>,
+    cost: &Array2<f32>,
+    reg: f32,
+    max_iter: usize,
+    tol: f32,
+) -> Result<f32> {
+    let n = a.len();
+    if b.len() != n {
+        return Err(Error::LengthMismatch(n, b.len()));
+    }
+    if cost.nrows() != n || cost.ncols() != n {
+        return Err(Error::CostShapeMismatch(n, n, cost.nrows(), cost.ncols()));
+    }
+
+    let (_p_pq, ot_pq, _iters_pq) = sinkhorn_log_with_convergence(a, b, cost, reg, max_iter, tol)?;
+    let (_p_pp, ot_pp, _iters_pp) = sinkhorn_log_with_convergence(a, a, cost, reg, max_iter, tol)?;
+    let (_p_qq, ot_qq, _iters_qq) = sinkhorn_log_with_convergence(b, b, cost, reg, max_iter, tol)?;
+
+    // In exact arithmetic this is >= 0, but allow tiny negative drift.
+    Ok((ot_pq - 0.5 * (ot_pp + ot_qq)).max(0.0))
+}
+
+/// Correct Sinkhorn divergence for **different supports**.
+///
+/// You must provide cost matrices:
+/// - `cost_ab` for X×Y
+/// - `cost_aa` for X×X
+/// - `cost_bb` for Y×Y
+pub fn sinkhorn_divergence_general(
+    a: &Array1<f32>,
+    b: &Array1<f32>,
+    cost_ab: &Array2<f32>,
+    cost_aa: &Array2<f32>,
+    cost_bb: &Array2<f32>,
+    reg: f32,
+    max_iter: usize,
+    tol: f32,
+) -> Result<f32> {
+    let m = a.len();
+    let n = b.len();
+    if cost_ab.nrows() != m || cost_ab.ncols() != n {
+        return Err(Error::CostShapeMismatch(m, n, cost_ab.nrows(), cost_ab.ncols()));
+    }
+    if cost_aa.nrows() != m || cost_aa.ncols() != m {
+        return Err(Error::CostShapeMismatch(m, m, cost_aa.nrows(), cost_aa.ncols()));
+    }
+    if cost_bb.nrows() != n || cost_bb.ncols() != n {
+        return Err(Error::CostShapeMismatch(n, n, cost_bb.nrows(), cost_bb.ncols()));
+    }
+
+    let (_p_pq, ot_pq, _iters_pq) =
+        sinkhorn_log_with_convergence(a, b, cost_ab, reg, max_iter, tol)?;
+    let (_p_pp, ot_pp, _iters_pp) =
+        sinkhorn_log_with_convergence(a, a, cost_aa, reg, max_iter, tol)?;
+    let (_p_qq, ot_qq, _iters_qq) =
+        sinkhorn_log_with_convergence(b, b, cost_bb, reg, max_iter, tol)?;
+
+    Ok((ot_pq - 0.5 * (ot_pp + ot_qq)).max(0.0))
 }
 
 /// Create Euclidean cost matrix from point positions.
@@ -458,7 +546,10 @@ pub fn euclidean_cost_matrix(x: &Array2<f32>, y: &Array2<f32>) -> Array2<f32> {
 /// Solves entropic OT using log-domain computations to avoid underflow/overflow.
 /// Formula: f_i = ε log(a_i) - ε log(Σ exp((g_j - C_ij) / ε))
 ///
-/// This implementation uses log-sum-exp trick for stability and normalizes distributions.
+/// This implementation uses log-sum-exp trick for stability and **normalizes** distributions.
+///
+/// If you need a convergence check against marginal constraints (and an error on failure),
+/// use [`sinkhorn_log_with_convergence`].
 pub fn sinkhorn_log(
     a: &Array1<f32>,
     b: &Array1<f32>,
@@ -475,8 +566,10 @@ pub fn sinkhorn_log(
     let a = a / (a_sum + EPSILON);
     let b = b / (b_sum + EPSILON);
 
-    let log_a = a.mapv(|x| (x + EPSILON).ln());
-    let log_b = b.mapv(|x| (x + EPSILON).ln());
+    // Treat exact zeros as -∞ (hard support exclusion) to avoid +∞ - (-∞) style NaNs.
+    // This also makes plan entries involving zero-mass bins go to exactly 0.
+    let log_a = a.mapv(|x| if x <= 0.0 { f32::NEG_INFINITY } else { x.ln() });
+    let log_b = b.mapv(|x| if x <= 0.0 { f32::NEG_INFINITY } else { x.ln() });
 
     let mut f: Array1<f32> = Array1::zeros(m);
     let mut g: Array1<f32> = Array1::zeros(n);
@@ -506,6 +599,566 @@ pub fn sinkhorn_log(
     }
 
     (plan, distance)
+}
+
+/// Sinkhorn in log-space with a convergence check on marginal constraints.
+///
+/// Returns `(plan, <C,P>, iterations)` if converged within `max_iter`.
+pub fn sinkhorn_log_with_convergence(
+    a: &Array1<f32>,
+    b: &Array1<f32>,
+    cost: &Array2<f32>,
+    reg: f32,
+    max_iter: usize,
+    tol: f32,
+) -> Result<(Array2<f32>, f32, usize)> {
+    let m = a.len();
+    let n = b.len();
+    if cost.nrows() != m || cost.ncols() != n {
+        return Err(Error::CostShapeMismatch(m, n, cost.nrows(), cost.ncols()));
+    }
+    if reg <= 0.0 || !reg.is_finite() {
+        return Err(Error::InvalidRegularization(reg));
+    }
+
+    // Normalize input distributions to ensure they sum to 1.
+    // (This matches the rest of this crate; callers can enforce strict normalization upstream.)
+    let a_sum = a.sum();
+    let b_sum = b.sum();
+    let a = a / (a_sum + EPSILON);
+    let b = b / (b_sum + EPSILON);
+
+    let log_a = a.mapv(|x| (x + EPSILON).ln());
+    let log_b = b.mapv(|x| (x + EPSILON).ln());
+
+    let mut f: Array1<f32> = Array1::zeros(m);
+    let mut g: Array1<f32> = Array1::zeros(n);
+
+    // Check marginals every so often; doing it every iteration is O(mn) overhead.
+    let check_every = 10usize.max(1);
+
+    for iter in 0..max_iter {
+        for i in 0..m {
+            let lse = logsumexp_by(n, |j| (g[j] - cost[[i, j]]) / reg);
+            f[i] = reg * (log_a[i] - lse);
+        }
+        for j in 0..n {
+            let lse = logsumexp_by(m, |i| (f[i] - cost[[i, j]]) / reg);
+            g[j] = reg * (log_b[j] - lse);
+        }
+
+        if (iter + 1) % check_every == 0 || iter + 1 == max_iter {
+            // max marginal error: compute row/col sums from current (f,g).
+            let mut max_err = 0.0f32;
+            for i in 0..m {
+                // row_sum = exp(f_i/reg) * Σ_j exp((g_j - C_ij)/reg)
+                let lse = logsumexp_by(n, |j| (g[j] - cost[[i, j]]) / reg);
+                let row_sum = (f[i] / reg).exp() * lse.exp();
+                max_err = max_err.max((row_sum - a[i]).abs());
+            }
+            for j in 0..n {
+                let lse = logsumexp_by(m, |i| (f[i] - cost[[i, j]]) / reg);
+                let col_sum = (g[j] / reg).exp() * lse.exp();
+                max_err = max_err.max((col_sum - b[j]).abs());
+            }
+            if max_err < tol {
+                // Build plan once at the end.
+                let mut plan = Array2::zeros((m, n));
+                let mut distance = 0.0;
+                for i in 0..m {
+                    for j in 0..n {
+                        let log_p = (f[i] + g[j] - cost[[i, j]]) / reg;
+                        let pij = log_p.exp();
+                        plan[[i, j]] = pij;
+                        distance += pij * cost[[i, j]];
+                    }
+                }
+                return Ok((plan, distance, iter + 1));
+            }
+        }
+    }
+
+    Err(Error::SinkhornNotConverged(max_iter))
+}
+
+/// Unbalanced Sinkhorn in log-space (KL-penalized marginals), scaling form.
+///
+/// This implements the classic scaling updates
+/// \(u \leftarrow (a/(Kv))^\alpha\), \(v \leftarrow (b/(K^\top u))^\alpha\),
+/// with \(K_{ij}=\exp(-C_{ij}/\varepsilon)\) and \(\alpha=\rho/(\rho+\varepsilon)\).
+///
+/// Compared to balanced OT, **do not** normalize `a` and `b` here: total mass is part of
+/// the signal. This is the entire point of unbalanced OT.
+///
+/// The classic scaling form for KL-penalized marginals yields updates:
+/// \[
+/// u \leftarrow \left(\frac{a}{K v}\right)^{\alpha},\quad
+/// v \leftarrow \left(\frac{b}{K^\top u}\right)^{\alpha},\quad
+/// \alpha = \frac{\rho}{\rho + \varepsilon}.
+/// \]
+/// In log-domain: \(\log u \leftarrow \alpha(\log a - \log(Kv))\), similarly for \(v\).
+///
+/// Returns `(plan, objective, iterations)` once the dual updates stabilize.
+///
+/// The returned `objective` matches this scaling formulation:
+/// \[
+/// \min_{P\ge 0}\; \langle P, C \rangle
+/// + \varepsilon\,\mathrm{KL}(P\,\|\,K)
+/// + \rho\,\mathrm{KL}(P\mathbf{1}\,\|\,a)
+/// + \rho\,\mathrm{KL}(P^\top\mathbf{1}\,\|\,b),
+/// \quad K_{ij}=\exp(-C_{ij}/\varepsilon).
+/// \]
+pub fn unbalanced_sinkhorn_log_with_convergence(
+    a: &Array1<f32>,
+    b: &Array1<f32>,
+    cost: &Array2<f32>,
+    reg: f32,
+    rho: f32,
+    max_iter: usize,
+    tol: f32,
+) -> Result<(Array2<f32>, f32, usize)> {
+    let m = a.len();
+    let n = b.len();
+    if cost.nrows() != m || cost.ncols() != n {
+        return Err(Error::CostShapeMismatch(m, n, cost.nrows(), cost.ncols()));
+    }
+    if reg <= 0.0 || !reg.is_finite() {
+        return Err(Error::InvalidRegularization(reg));
+    }
+    if rho <= 0.0 || !rho.is_finite() {
+        return Err(Error::InvalidMassPenalty(rho));
+    }
+
+    // Validate non-negativity and non-emptiness of masses.
+    if a.iter().any(|&x| x < 0.0) || b.iter().any(|&x| x < 0.0) {
+        return Err(Error::Domain("unbalanced OT requires nonnegative masses"));
+    }
+    let a_sum = a.sum();
+    let b_sum = b.sum();
+    if a_sum <= 0.0 || b_sum <= 0.0 {
+        return Err(Error::Domain("unbalanced OT requires positive total mass"));
+    }
+
+    let alpha = rho / (rho + reg);
+
+    // Treat zero mass as hard support exclusion (log = -∞).
+    let log_a = a.mapv(|x| if x <= 0.0 { f32::NEG_INFINITY } else { x.ln() });
+    let log_b = b.mapv(|x| if x <= 0.0 { f32::NEG_INFINITY } else { x.ln() });
+
+    // log u, log v (dual scaling variables in log-space)
+    let mut log_v: Array1<f32> = Array1::zeros(n);
+
+    // Check convergence by dual drift (fixed-point residual).
+    let check_every = 10usize.max(1);
+
+    for iter in 0..max_iter {
+        // log(Kv)_i = logsumexp_j (logK_ij + log_v[j]), with logK_ij = -C_ij/reg.
+        //
+        // IMPORTANT: `log_v` is already a log-scale quantity; do not divide it by `reg`.
+        let mut log_u_new = Array1::zeros(m);
+        for i in 0..m {
+            if log_a[i] == f32::NEG_INFINITY {
+                log_u_new[i] = f32::NEG_INFINITY;
+                continue;
+            }
+            let lkv = logsumexp_by(n, |j| log_v[j] - (cost[[i, j]] / reg));
+            // log u = alpha * (log a - log(Kv))
+            if lkv == f32::NEG_INFINITY {
+                log_u_new[i] = f32::NEG_INFINITY;
+            } else {
+                log_u_new[i] = alpha * (log_a[i] - lkv);
+            }
+        }
+
+        let mut log_v_new = Array1::zeros(n);
+        for j in 0..n {
+            if log_b[j] == f32::NEG_INFINITY {
+                log_v_new[j] = f32::NEG_INFINITY;
+                continue;
+            }
+            let lktu = logsumexp_by(m, |i| log_u_new[i] - (cost[[i, j]] / reg));
+            if lktu == f32::NEG_INFINITY {
+                log_v_new[j] = f32::NEG_INFINITY;
+            } else {
+                log_v_new[j] = alpha * (log_b[j] - lktu);
+            }
+        }
+
+        let log_u = log_u_new;
+        log_v = log_v_new;
+
+        if (iter + 1) % check_every == 0 || iter + 1 == max_iter {
+            // Fixed-point stability: max change in log_u/log_v across one extra update.
+            let mut max_diff = 0.0f32;
+
+            // one-step recompute to measure residual
+            for i in 0..m {
+                if log_a[i] == f32::NEG_INFINITY {
+                    continue;
+                }
+                let lkv = logsumexp_by(n, |j| log_v[j] - (cost[[i, j]] / reg));
+                if lkv != f32::NEG_INFINITY {
+                    let val = alpha * (log_a[i] - lkv);
+                    max_diff = max_diff.max((val - log_u[i]).abs());
+                }
+            }
+            for j in 0..n {
+                if log_b[j] == f32::NEG_INFINITY {
+                    continue;
+                }
+                let lktu = logsumexp_by(m, |i| log_u[i] - (cost[[i, j]] / reg));
+                if lktu != f32::NEG_INFINITY {
+                    let val = alpha * (log_b[j] - lktu);
+                    max_diff = max_diff.max((val - log_v[j]).abs());
+                }
+            }
+
+            if max_diff < tol {
+                let mut plan = Array2::zeros((m, n));
+                let mut transport_cost = 0.0;
+                for i in 0..m {
+                    for j in 0..n {
+                        if log_u[i] == f32::NEG_INFINITY || log_v[j] == f32::NEG_INFINITY {
+                            continue;
+                        }
+                        // P_ij = u_i * exp(-C_ij/ε) * v_j  ⇒  log P_ij = log u_i + log v_j - C_ij/ε
+                        let log_p = log_u[i] + log_v[j] - (cost[[i, j]] / reg);
+                        let pij = log_p.exp();
+                        plan[[i, j]] = pij;
+                        transport_cost += pij * cost[[i, j]];
+                    }
+                }
+
+                // Compute the full objective for the scaling formulation:
+                // <C,P> + ε KL(P || K) + ρ KL(P1 || a) + ρ KL(Pᵀ1 || b)
+                //
+                // We use the generalized (unnormalized) KL:
+                // KL(p||q) = Σ p log(p/q) - p + q, with p=0 contributing +q.
+                fn kl_mass(p: &Array1<f32>, q: &Array1<f32>) -> f32 {
+                    let mut s: f64 = 0.0;
+                    for (&pi, &qi) in p.iter().zip(q.iter()) {
+                        // Treat tiny mass as zero to avoid spurious +∞ from float noise.
+                        if pi <= 1e-12 {
+                            s += qi as f64;
+                            continue;
+                        }
+                        if qi <= 0.0 {
+                            return f32::INFINITY;
+                        }
+                        let pi64 = pi as f64;
+                        let qi64 = qi as f64;
+                        s += pi64 * (pi64 / qi64).ln() - pi64 + qi64;
+                    }
+                    s as f32
+                }
+
+                let row = plan.sum_axis(ndarray::Axis(1));
+                let col = plan.sum_axis(ndarray::Axis(0));
+
+                let kl_row = kl_mass(&row, a);
+                let kl_col = kl_mass(&col, b);
+
+                // KL(P || K) without materializing K:
+                // log K_ij = -C_ij / ε, and Σ K_ij is a constant offset in the generalized KL.
+                let mut kl_plan: f64 = 0.0;
+                let mut sum_k: f64 = 0.0;
+                for i in 0..m {
+                    for j in 0..n {
+                        let cij = cost[[i, j]] as f64;
+                        sum_k += (-cij / (reg as f64)).exp();
+
+                        let pij = plan[[i, j]] as f64;
+                        if pij <= 1e-12 {
+                            continue;
+                        }
+                        let log_k = -cij / (reg as f64);
+                        kl_plan += pij * ((pij.ln() - log_k)) - pij;
+                    }
+                }
+                kl_plan += sum_k;
+
+                let obj = transport_cost + reg * (kl_plan as f32) + rho * (kl_row + kl_col);
+
+                return Ok((plan, obj, iter + 1));
+            }
+        }
+    }
+
+    Err(Error::SinkhornNotConverged(max_iter))
+}
+
+/// Unbalanced Sinkhorn divergence for measures on the same support.
+///
+/// This mirrors `sinkhorn_divergence_same_support` but uses unbalanced OT subproblems.
+pub fn unbalanced_sinkhorn_divergence_same_support(
+    a: &Array1<f32>,
+    b: &Array1<f32>,
+    cost: &Array2<f32>,
+    reg: f32,
+    rho: f32,
+    max_iter: usize,
+    tol: f32,
+) -> Result<f32> {
+    let n = a.len();
+    if b.len() != n {
+        return Err(Error::LengthMismatch(n, b.len()));
+    }
+    if cost.nrows() != n || cost.ncols() != n {
+        return Err(Error::CostShapeMismatch(n, n, cost.nrows(), cost.ncols()));
+    }
+
+    // Follow Séjourné et al. (2019) / GeomLoss: compute divergence from *dual potentials*.
+    // This avoids ambiguity about which primal objective a given scaling scheme solves.
+    //
+    // Reference: `jeanfeydy/geomloss`, `geomloss/sinkhorn_divergence.py`.
+    fn log_weights(w: &Array1<f32>) -> Array1<f32> {
+        w.mapv(|x| if x <= 0.0 { -100000.0 } else { x.ln() })
+    }
+
+    fn softmin_xy(eps: f32, cost: &Array2<f32>, h_y: &Array1<f32>) -> Array1<f32> {
+        let m = cost.nrows();
+        let n = cost.ncols();
+        debug_assert_eq!(h_y.len(), n);
+        let mut out = Array1::zeros(m);
+        for i in 0..m {
+            let lse = logsumexp_by(n, |j| h_y[j] - cost[[i, j]] / eps);
+            out[i] = -eps * lse;
+        }
+        out
+    }
+
+    fn softmin_yx(eps: f32, cost: &Array2<f32>, h_x: &Array1<f32>) -> Array1<f32> {
+        let m = cost.nrows();
+        let n = cost.ncols();
+        debug_assert_eq!(h_x.len(), m);
+        let mut out = Array1::zeros(n);
+        for j in 0..n {
+            let lse = logsumexp_by(m, |i| h_x[i] - cost[[i, j]] / eps);
+            out[j] = -eps * lse;
+        }
+        out
+    }
+
+    let eps = reg;
+    let damping = rho / (rho + eps);
+    let a_log = log_weights(a);
+    let b_log = log_weights(b);
+
+    // Initialize dual potentials (GeomLoss-style).
+    let mut g_ab = damping * softmin_yx(eps, cost, &a_log);
+    let mut f_ba = damping * softmin_xy(eps, cost, &b_log);
+    let mut f_aa = damping * softmin_xy(eps, cost, &a_log);
+    let mut g_bb = damping * softmin_xy(eps, cost, &b_log);
+
+    let check_every = 10usize.max(1);
+    for iter in 0..max_iter {
+        let h_b = &b_log + &(g_ab.mapv(|x| x / eps));
+        let h_a = &a_log + &(f_ba.mapv(|x| x / eps));
+
+        let ft_ba = damping * softmin_xy(eps, cost, &h_b);
+        let gt_ab = damping * softmin_yx(eps, cost, &h_a);
+
+        let h_aa = &a_log + &(f_aa.mapv(|x| x / eps));
+        let h_bb = &b_log + &(g_bb.mapv(|x| x / eps));
+
+        let ft_aa = damping * softmin_xy(eps, cost, &h_aa);
+        let gt_bb = damping * softmin_xy(eps, cost, &h_bb);
+
+        let f_ba_new = 0.5 * (&f_ba + &ft_ba);
+        let g_ab_new = 0.5 * (&g_ab + &gt_ab);
+        let f_aa_new = 0.5 * (&f_aa + &ft_aa);
+        let g_bb_new = 0.5 * (&g_bb + &gt_bb);
+
+        f_ba = f_ba_new;
+        g_ab = g_ab_new;
+        f_aa = f_aa_new;
+        g_bb = g_bb_new;
+
+        if (iter + 1) % check_every == 0 || iter + 1 == max_iter {
+            let mut max_diff = 0.0f32;
+            for i in 0..n {
+                max_diff = max_diff.max((f_ba[i] - ft_ba[i]).abs());
+                max_diff = max_diff.max((f_aa[i] - ft_aa[i]).abs());
+            }
+            for j in 0..n {
+                max_diff = max_diff.max((g_ab[j] - gt_ab[j]).abs());
+                max_diff = max_diff.max((g_bb[j] - gt_bb[j]).abs());
+            }
+            if max_diff < tol {
+                break;
+            }
+        }
+    }
+
+    let scale = rho + eps / 2.0;
+    let mut term_a: f64 = 0.0;
+    for i in 0..n {
+        let ai = a[i] as f64;
+        if ai == 0.0 {
+            continue;
+        }
+        let x = (-f_aa[i] / rho).exp() - (-f_ba[i] / rho).exp();
+        term_a += ai * (scale as f64) * (x as f64);
+    }
+    let mut term_b: f64 = 0.0;
+    for j in 0..n {
+        let bj = b[j] as f64;
+        if bj == 0.0 {
+            continue;
+        }
+        let x = (-g_bb[j] / rho).exp() - (-g_ab[j] / rho).exp();
+        term_b += bj * (scale as f64) * (x as f64);
+    }
+
+    let mass_corr = 0.5 * eps * (a.sum() - b.sum()).powi(2);
+    Ok((term_a + term_b) as f32 + mass_corr)
+}
+
+/// Unbalanced Sinkhorn divergence for different supports.
+///
+/// You must provide cost matrices:
+/// - `cost_ab` for X×Y (distance between a and b)
+/// - `cost_aa` for X×X (distance between a and a)
+/// - `cost_bb` for Y×Y (distance between b and b)
+///
+/// Computes the debiased divergence:
+/// S(a,b) = OT(a,b) - 0.5*OT(a,a) - 0.5*OT(b,b) + 0.5*ε*(m(a)-m(b))²
+pub fn unbalanced_sinkhorn_divergence_general(
+    a: &Array1<f32>,
+    b: &Array1<f32>,
+    cost_ab: &Array2<f32>,
+    cost_aa: &Array2<f32>,
+    cost_bb: &Array2<f32>,
+    reg: f32,
+    rho: f32,
+    max_iter: usize,
+    tol: f32,
+) -> Result<f32> {
+    let m = a.len();
+    let n = b.len();
+    if cost_ab.nrows() != m || cost_ab.ncols() != n {
+        return Err(Error::CostShapeMismatch(m, n, cost_ab.nrows(), cost_ab.ncols()));
+    }
+    if cost_aa.nrows() != m || cost_aa.ncols() != m {
+        return Err(Error::CostShapeMismatch(m, m, cost_aa.nrows(), cost_aa.ncols()));
+    }
+    if cost_bb.nrows() != n || cost_bb.ncols() != n {
+        return Err(Error::CostShapeMismatch(n, n, cost_bb.nrows(), cost_bb.ncols()));
+    }
+
+    fn log_weights(w: &Array1<f32>) -> Array1<f32> {
+        w.mapv(|x| if x <= 0.0 { -100000.0 } else { x.ln() })
+    }
+
+    // softmin_rows(eps, C, h) -> out[i] = -eps * logsumexp_j((h[j] - C_ij)/eps)
+    fn softmin_rows(eps: f32, cost: &Array2<f32>, h: &Array1<f32>) -> Array1<f32> {
+        let m = cost.nrows();
+        let n = cost.ncols();
+        debug_assert_eq!(h.len(), n);
+        let mut out = Array1::zeros(m);
+        for i in 0..m {
+            let lse = logsumexp_by(n, |j| h[j] - cost[[i, j]] / eps);
+            out[i] = -eps * lse;
+        }
+        out
+    }
+
+    // softmin_cols(eps, C, h) -> out[j] = -eps * logsumexp_i((h[i] - C_ij)/eps)
+    fn softmin_cols(eps: f32, cost: &Array2<f32>, h: &Array1<f32>) -> Array1<f32> {
+        let m = cost.nrows();
+        let n = cost.ncols();
+        debug_assert_eq!(h.len(), m);
+        let mut out = Array1::zeros(n);
+        for j in 0..n {
+            let lse = logsumexp_by(m, |i| h[i] - cost[[i, j]] / eps);
+            out[j] = -eps * lse;
+        }
+        out
+    }
+
+    let eps = reg;
+    let damping = rho / (rho + eps);
+    let a_log = log_weights(a);
+    let b_log = log_weights(b);
+
+    // Initialize dual potentials.
+    // g_ab: potential on b for (a,b). Initialized from a.
+    // f_ba: potential on a for (a,b). Initialized from b.
+    // f_aa: potential on a for (a,a). Initialized from a.
+    // g_bb: potential on b for (b,b). Initialized from b.
+    let mut g_ab = damping * softmin_cols(eps, cost_ab, &a_log);
+    let mut f_ba = damping * softmin_rows(eps, cost_ab, &b_log);
+    let mut f_aa = damping * softmin_rows(eps, cost_aa, &a_log);
+    let mut g_bb = damping * softmin_cols(eps, cost_bb, &b_log); // cost_bb is square symmetric usually, but treat generically
+
+    let check_every = 10usize.max(1);
+    for iter in 0..max_iter {
+        // Update potentials for (a,b)
+        let h_b = &b_log + &(g_ab.mapv(|x| x / eps));
+        let h_a = &a_log + &(f_ba.mapv(|x| x / eps));
+        let ft_ba = damping * softmin_rows(eps, cost_ab, &h_b);
+        let gt_ab = damping * softmin_cols(eps, cost_ab, &h_a);
+
+        // Update potentials for (a,a)
+        let h_aa = &a_log + &(f_aa.mapv(|x| x / eps));
+        // For symmetric problem (a,a), we only need one potential f_aa if symmetric.
+        // But implementing full update for correctness:
+        // Target is 'a', potential on target is f_aa.
+        // We update potential on source (also 'a'), which is also f_aa.
+        let ft_aa = damping * softmin_rows(eps, cost_aa, &h_aa);
+
+        // Update potentials for (b,b)
+        let h_bb = &b_log + &(g_bb.mapv(|x| x / eps));
+        let gt_bb = damping * softmin_cols(eps, cost_bb, &h_bb);
+
+        let f_ba_new = 0.5 * (&f_ba + &ft_ba);
+        let g_ab_new = 0.5 * (&g_ab + &gt_ab);
+        let f_aa_new = 0.5 * (&f_aa + &ft_aa);
+        let g_bb_new = 0.5 * (&g_bb + &gt_bb);
+
+        f_ba = f_ba_new;
+        g_ab = g_ab_new;
+        f_aa = f_aa_new;
+        g_bb = g_bb_new;
+
+        if (iter + 1) % check_every == 0 || iter + 1 == max_iter {
+            let mut max_diff = 0.0f32;
+            for i in 0..m {
+                max_diff = max_diff.max((f_ba[i] - ft_ba[i]).abs());
+                max_diff = max_diff.max((f_aa[i] - ft_aa[i]).abs());
+            }
+            for j in 0..n {
+                max_diff = max_diff.max((g_ab[j] - gt_ab[j]).abs());
+                max_diff = max_diff.max((g_bb[j] - gt_bb[j]).abs());
+            }
+            if max_diff < tol {
+                break;
+            }
+        }
+    }
+
+    let scale = rho + eps / 2.0;
+    
+    // Term A: <a, (-f_aa/rho).exp() - (-f_ba/rho).exp()>
+    let mut term_a: f64 = 0.0;
+    for i in 0..m {
+        let ai = a[i] as f64;
+        if ai == 0.0 { continue; }
+        let x = (-f_aa[i] / rho).exp() - (-f_ba[i] / rho).exp();
+        term_a += ai * (scale as f64) * (x as f64);
+    }
+
+    // Term B: <b, (-g_bb/rho).exp() - (-g_ab/rho).exp()>
+    let mut term_b: f64 = 0.0;
+    for j in 0..n {
+        let bj = b[j] as f64;
+        if bj == 0.0 { continue; }
+        let x = (-g_bb[j] / rho).exp() - (-g_ab[j] / rho).exp();
+        term_b += bj * (scale as f64) * (x as f64);
+    }
+
+    let mass_corr = 0.5 * eps * (a.sum() - b.sum()).powi(2);
+    Ok((term_a + term_b) as f32 + mass_corr)
 }
 
 /// Sliced Wasserstein distance (fast approximation for high dimensions).
@@ -689,8 +1342,12 @@ mod tests {
     proptest! {
         #[test]
         fn prop_sinkhorn_divergence_non_negative(
-            a in prop::collection::vec(0.0f32..1.0, 2..8),
-            b in prop::collection::vec(0.0f32..1.0, 2..8),
+            (a, b) in (2usize..8).prop_flat_map(|n| {
+                (
+                    prop::collection::vec(0.0f32..1.0, n),
+                    prop::collection::vec(0.0f32..1.0, n),
+                )
+            }),
         ) {
             let n = a.len();
             let mut a_dist = Array1::from_vec(a);
@@ -708,8 +1365,9 @@ mod tests {
                     cost[[i, j]] = (i as f32 - j as f32).abs();
                 }
             }
-            
-            let div = sinkhorn_divergence(&a_dist, &b_dist, &cost, 0.1, 50);
+
+            // Sinkhorn convergence can be slow for some marginals; give it enough iterations.
+            let div = sinkhorn_divergence_same_support(&a_dist, &b_dist, &cost, 0.1, 2000, 1e-2).unwrap();
             prop_assert!(div >= -1e-6);
         }
 
@@ -744,5 +1402,31 @@ mod tests {
             prop_assert!(lse >= max - 1e-5);
             prop_assert!(lse <= max + (xs.len() as f32).ln() + 1e-5);
         }
+    }
+
+    #[test]
+    fn sinkhorn_divergence_zero_on_diagonal_same_support() {
+        let a = array![0.2, 0.3, 0.5];
+        let cost = array![
+            [0.0, 1.0, 2.0],
+            [1.0, 0.0, 1.0],
+            [2.0, 1.0, 0.0]
+        ];
+        let div = sinkhorn_divergence_same_support(&a, &a, &cost, 0.1, 500, 1e-4).unwrap();
+        assert!(div.abs() < 1e-5, "div={}", div);
+    }
+
+    #[test]
+    fn sinkhorn_divergence_is_symmetric_same_support() {
+        let a = array![0.2, 0.3, 0.5];
+        let b = array![0.5, 0.4, 0.1];
+        let cost = array![
+            [0.0, 1.0, 2.0],
+            [1.0, 0.0, 1.0],
+            [2.0, 1.0, 0.0]
+        ];
+        let ab = sinkhorn_divergence_same_support(&a, &b, &cost, 0.1, 500, 1e-4).unwrap();
+        let ba = sinkhorn_divergence_same_support(&b, &a, &cost, 0.1, 500, 1e-4).unwrap();
+        assert!((ab - ba).abs() < 1e-5, "ab={} ba={}", ab, ba);
     }
 }
