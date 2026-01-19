@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use ndarray::Array1;
 use std::collections::BTreeMap;
 

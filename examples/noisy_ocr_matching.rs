@@ -25,6 +25,13 @@ use wass::{unbalanced_sinkhorn_divergence_general, unbalanced_sinkhorn_log_with_
 
 use common::textish::{base_weight, cosine_dist, embed_char_ngrams_signed, normalize_token};
 
+fn top_k_by<T: Copy>(xs: &[(T, f32)], k: usize) -> Vec<(T, f32)> {
+    let mut v = xs.to_vec();
+    v.sort_by(|a, b| b.1.total_cmp(&a.1));
+    v.truncate(k);
+    v
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Setup Data
     let ref_text = "The quarterly earnings showed steady growth in all sectors";
@@ -113,43 +120,84 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &ref_weights, &ocr_weights, &c_ab, reg, rho, max_iter, tol
         )?;
 
-        if rho < 1.0 {
-            println!("\n  Robust Alignment (rho={}):", rho);
-            for (i, ref_tok) in ref_tokens.iter().enumerate() {
-                // Find best match in OCR
-                let mut best_j = 0;
-                let mut max_p = 0.0;
-                for j in 0..ocr_tokens.len() {
-                    if plan[[i, j]] > max_p {
-                        max_p = plan[[i, j]];
-                        best_j = j;
-                    }
-                }
-                
-                if max_p > 0.01 {
-                    println!(
-                        "    {:15} -> {:15} (p={:.2}, dist={:.2}, w={:.3})",
-                        ref_tok,
-                        ocr_tokens[best_j],
-                        max_p,
-                        c_ab[[i, best_j]],
-                        ref_weights[i]
-                    );
-                } else {
-                    println!(
-                        "    {:15} -> [Deleted/Lost] (w={:.3})",
-                        ref_tok,
-                        ref_weights[i]
-                    );
+        // Diagnostics we care about in practice:
+        // - which tokens matched credibly (low dist, nontrivial mass)
+        // - which source mass was deleted
+        // - which target mass was unused (i.e. "header/footer" got ignored)
+        let p_min = 0.02f32;
+        let dist_max = 0.70f32;
+
+        let mut good: Vec<(usize, usize, f32)> = Vec::new();
+        let mut deleted_src: Vec<(usize, f32)> = Vec::new();
+        let mut unused_tgt: Vec<(usize, f32)> = Vec::new();
+
+        for i in 0..ref_tokens.len() {
+            let row_sum = plan.row(i).sum();
+            let deleted = (ref_weights[i] - row_sum).max(0.0);
+            if deleted > 0.0 {
+                deleted_src.push((i, deleted));
+            }
+
+            let mut best_j = 0usize;
+            let mut best_p = 0.0f32;
+            for j in 0..ocr_tokens.len() {
+                let p = plan[[i, j]];
+                if p > best_p {
+                    best_p = p;
+                    best_j = j;
                 }
             }
-            
-            // Check what happened to the first token (usually "header"/boilerplate)
-            let j0 = 0;
-            let used = plan.column(j0).sum();
-            println!("  token[0]={:?} used mass: {:.3} (original: {:.3})", ocr_tokens[j0], used, ocr_weights[j0]);
-            println!();
+            let dist = c_ab[[i, best_j]];
+            if best_p >= p_min && dist <= dist_max {
+                good.push((i, best_j, best_p));
+            }
         }
+
+        for j in 0..ocr_tokens.len() {
+            let col_sum = plan.column(j).sum();
+            let unused = (ocr_weights[j] - col_sum).max(0.0);
+            if unused > 0.0 {
+                unused_tgt.push((j, unused));
+            }
+        }
+
+        let plan_mass = plan.sum();
+        let deleted_total: f32 = deleted_src.iter().map(|(_, x)| *x).sum();
+        let unused_total: f32 = unused_tgt.iter().map(|(_, x)| *x).sum();
+
+        println!("  plan_mass={plan_mass:.3}  deleted_src={deleted_total:.3}  unused_tgt={unused_total:.3}");
+        println!();
+
+        println!("  credible matches (p>={p_min:.2}, dist<={dist_max:.2}):");
+        if good.is_empty() {
+            println!("    (none)");
+        } else {
+            for (i, j, p) in good.iter() {
+                println!(
+                    "    {:15} -> {:15}  p={:.2}  dist={:.2}  w_src={:.3} w_tgt={:.3}",
+                    ref_tokens[*i],
+                    ocr_tokens[*j],
+                    *p,
+                    c_ab[[*i, *j]],
+                    ref_weights[*i],
+                    ocr_weights[*j]
+                );
+            }
+        }
+
+        println!();
+        println!("  most deleted source tokens:");
+        for (i, m) in top_k_by(&deleted_src.iter().map(|(i, m)| (*i, *m)).collect::<Vec<_>>(), 6) {
+            println!("    {:15} deleted={:.3}  w_src={:.3}", ref_tokens[i], m, ref_weights[i]);
+        }
+
+        println!();
+        println!("  most unused target tokens:");
+        for (j, m) in top_k_by(&unused_tgt.iter().map(|(j, m)| (*j, *m)).collect::<Vec<_>>(), 8) {
+            println!("    {:15} unused={:.3}  w_tgt={:.3}", ocr_tokens[j], m, ocr_weights[j]);
+        }
+
+        println!();
     }
 
     Ok(())
