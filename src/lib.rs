@@ -403,6 +403,19 @@ pub fn earth_mover_distance(a: &Array1<f32>, b: &Array1<f32>, cost: &Array2<f32>
 ///
 /// This provides a positive-definite divergence that interpolates between
 /// Wasserstein distance (ε → 0) and Maximum Mean Discrepancy (ε → ∞).
+///
+/// # Warning
+///
+/// This function is only a true Sinkhorn divergence when the supports match (i.e.
+/// `cost` is square and can be used for `p-p` and `q-q` self-costs).
+///
+/// If `cost` is **rectangular**, this function returns the entropic OT cost `OT_ε(p,q)`
+/// (not debiased), which is **not** a divergence.
+///
+/// Prefer:
+/// - [`sinkhorn_divergence_same_support`] when supports match
+/// - [`sinkhorn_divergence_general`] when supports differ and you have `cost_ab/cost_aa/cost_bb`
+#[deprecated(note = "Use sinkhorn_divergence_same_support or sinkhorn_divergence_general for a true divergence")]
 pub fn sinkhorn_divergence(
     a: &Array1<f32>,
     b: &Array1<f32>,
