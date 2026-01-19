@@ -20,6 +20,13 @@ use common::textish::{
     bag_of_tokens, cosine_dist, embed_char_ngrams_signed, normalize_token, weights_tfidf_2docs,
 };
 
+fn top_k_indices_by(xs: &[f32], k: usize) -> Vec<(usize, f32)> {
+    let mut v: Vec<(usize, f32)> = xs.iter().copied().enumerate().collect();
+    v.sort_by(|a, b| b.1.total_cmp(&a.1));
+    v.truncate(k);
+    v
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let doc_a = r#"
         Breaking: Quarterly earnings show steady growth
@@ -89,20 +96,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (plan, _obj, _iters) =
             unbalanced_sinkhorn_log_with_convergence(&w_a, &w_b, &c_ab, reg, rho, max_iter, tol)?;
 
-        // Collect top edges (i,j,mass).
-        let mut edges: Vec<(usize, usize, f32)> = Vec::new();
+        let plan_mass = plan.sum();
+        println!("plan_mass={plan_mass:.3}");
+        println!();
+
+        // Split alignments into "credible" vs "suspect forced matches".
+        // This is opinionated: if the cost is high, we don't pretend it's a good alignment.
+        let p_min = 0.01f32;
+        let dist_good = 0.70f32;
+        let dist_bad = 0.85f32;
+
+        let mut good_edges: Vec<(usize, usize, f32)> = Vec::new();
+        let mut suspect_edges: Vec<(usize, usize, f32)> = Vec::new();
         for i in 0..toks_a.len() {
             for j in 0..toks_b.len() {
                 let p = plan[[i, j]];
-                if p > 0.01 {
-                    edges.push((i, j, p));
+                if p < p_min {
+                    continue;
+                }
+                let d = c_ab[[i, j]];
+                if d <= dist_good {
+                    good_edges.push((i, j, p));
+                } else if d >= dist_bad {
+                    suspect_edges.push((i, j, p));
                 }
             }
         }
-        edges.sort_by(|a, b| b.2.total_cmp(&a.2));
+        good_edges.sort_by(|a, b| b.2.total_cmp(&a.2));
+        suspect_edges.sort_by(|a, b| b.2.total_cmp(&a.2));
 
-        println!("top alignments (mass > 0.01):");
-        for (i, j, p) in edges.iter().take(12) {
+        println!("credible alignments (p>={p_min:.2}, dist<={dist_good:.2}):");
+        for (i, j, p) in good_edges.iter().take(12) {
             println!(
                 "  {:12} -> {:12}  p={:.3}  dist={:.2}  w_a={:.3} w_b={:.3}",
                 toks_a[*i],
@@ -113,6 +137,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 w_b[*j]
             );
         }
+
+        println!();
+        println!("suspect forced matches (p>={p_min:.2}, dist>={dist_bad:.2}):");
+        if suspect_edges.is_empty() {
+            println!("  (none)");
+        } else {
+            for (i, j, p) in suspect_edges.iter().take(8) {
+                println!(
+                    "  {:12} -> {:12}  p={:.3}  dist={:.2}  w_a={:.3} w_b={:.3}",
+                    toks_a[*i],
+                    toks_b[*j],
+                    *p,
+                    c_ab[[*i, *j]],
+                    w_a[*i],
+                    w_b[*j]
+                );
+            }
+        }
+
+        // Deleted / unused mass summaries.
+        let mut deleted_src = vec![0.0f32; toks_a.len()];
+        for i in 0..toks_a.len() {
+            let row_sum = plan.row(i).sum();
+            deleted_src[i] = (w_a[i] - row_sum).max(0.0);
+        }
+        let mut unused_tgt = vec![0.0f32; toks_b.len()];
+        for j in 0..toks_b.len() {
+            let col_sum = plan.column(j).sum();
+            unused_tgt[j] = (w_b[j] - col_sum).max(0.0);
+        }
+        let deleted_total: f32 = deleted_src.iter().sum();
+        let unused_total: f32 = unused_tgt.iter().sum();
+
+        println!();
+        println!("deleted_src_total={deleted_total:.3}  unused_tgt_total={unused_total:.3}");
+        println!("top deleted source tokens:");
+        for (i, m) in top_k_indices_by(&deleted_src, 6) {
+            if m <= 0.0 {
+                break;
+            }
+            println!("  {:12} deleted={:.3}  w_a={:.3}", toks_a[i], m, w_a[i]);
+        }
+        println!("top unused target tokens:");
+        for (j, m) in top_k_indices_by(&unused_tgt, 8) {
+            if m <= 0.0 {
+                break;
+            }
+            println!("  {:12} unused={:.3}  w_b={:.3}", toks_b[j], m, w_b[j]);
+        }
+
         println!();
     }
 
