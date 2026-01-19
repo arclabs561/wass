@@ -55,8 +55,13 @@ pub fn gromov_wasserstein(
             }
         }
 
-        let (new_plan, _dist) = sinkhorn_log(p, q, &g, epsilon, sinkhorn_iter);
-        plan = new_plan;
+        // `sinkhorn_log` currently operates on f32; keep the public GW API in f64, but
+        // do the Sinkhorn substep in f32.
+        let p32 = p.mapv(|x| x as f32);
+        let q32 = q.mapv(|x| x as f32);
+        let g32 = g.mapv(|x| x as f32);
+        let (new_plan32, _dist) = sinkhorn_log(&p32, &q32, &g32, epsilon as f32, sinkhorn_iter);
+        plan = new_plan32.mapv(|x| x as f64);
         gw_dist = g.iter().zip(plan.iter()).map(|(gi, pi)| gi * pi).sum();
     }
 

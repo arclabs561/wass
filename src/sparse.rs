@@ -291,10 +291,10 @@ pub fn solve_semidual_l2(
     let a_sum: f64 = a.iter().sum();
     let b_sum: f64 = b.iter().sum();
     if (a_sum - 1.0).abs() > 1e-6 {
-        return Err(Error::NotNormalized(a_sum));
+        return Err(Error::NotNormalized(a_sum as f32));
     }
     if (b_sum - 1.0).abs() > 1e-6 {
-        return Err(Error::NotNormalized(b_sum));
+        return Err(Error::NotNormalized(b_sum as f32));
     }
 
     let regul = SquaredL2::new(gamma);
