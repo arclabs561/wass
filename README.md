@@ -65,9 +65,14 @@ Run these to see OT in action:
 | `wasserstein_1d` | 1D distributions | O(n) |
 | `sinkhorn` | General transport (dense) | O(n^2 x iter) |
 | `sinkhorn_with_convergence` | With early stopping | O(n^2 x iter) |
+| `sinkhorn_divergence_same_support` | Debiased divergence (same support) | O(n^2 x iter) |
+| `sinkhorn_divergence_general` | Debiased divergence (different supports) | O(mn x iter) |
 | `unbalanced_sinkhorn_divergence_general` | Robust comparison (different supports) | O(mn x iter) |
 | `sparse::solve_semidual_l2` | Sparse transport (L2) | O(n^2 x iter) |
 | `sliced_wasserstein` | High-dim approx | O(n_proj x n log n) |
+
+Note: `sinkhorn_divergence` is deprecated; it only computes a true divergence when the
+cost is square. Use the explicit `*_same_support` / `*_general` variants instead.
 
 ## Why Optimal Transport?
 
