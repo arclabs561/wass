@@ -621,15 +621,25 @@ pub fn sinkhorn_log_with_convergence(
         return Err(Error::InvalidRegularization(reg));
     }
 
+    // Balanced OT expects nonnegative mass with positive total mass.
+    if a.iter().any(|&x| x < 0.0) || b.iter().any(|&x| x < 0.0) {
+        return Err(Error::Domain("sinkhorn requires nonnegative masses"));
+    }
+
     // Normalize input distributions to ensure they sum to 1.
     // (This matches the rest of this crate; callers can enforce strict normalization upstream.)
     let a_sum = a.sum();
     let b_sum = b.sum();
+    if a_sum <= 0.0 || b_sum <= 0.0 {
+        return Err(Error::Domain("sinkhorn requires positive total mass"));
+    }
     let a = a / (a_sum + EPSILON);
     let b = b / (b_sum + EPSILON);
 
-    let log_a = a.mapv(|x| (x + EPSILON).ln());
-    let log_b = b.mapv(|x| (x + EPSILON).ln());
+    // Consistent with `sinkhorn_log`: treat exact zeros as hard support exclusion.
+    // This matters for correctness when users pass sparse histograms.
+    let log_a = a.mapv(|x| if x <= 0.0 { f32::NEG_INFINITY } else { x.ln() });
+    let log_b = b.mapv(|x| if x <= 0.0 { f32::NEG_INFINITY } else { x.ln() });
 
     let mut f: Array1<f32> = Array1::zeros(m);
     let mut g: Array1<f32> = Array1::zeros(n);
@@ -906,6 +916,18 @@ pub fn unbalanced_sinkhorn_divergence_same_support(
     if cost.nrows() != n || cost.ncols() != n {
         return Err(Error::CostShapeMismatch(n, n, cost.nrows(), cost.ncols()));
     }
+    if reg <= 0.0 || !reg.is_finite() {
+        return Err(Error::InvalidRegularization(reg));
+    }
+    if rho <= 0.0 || !rho.is_finite() {
+        return Err(Error::InvalidMassPenalty(rho));
+    }
+    if a.iter().any(|&x| x < 0.0) || b.iter().any(|&x| x < 0.0) {
+        return Err(Error::Domain("unbalanced OT requires nonnegative masses"));
+    }
+    if a.sum() <= 0.0 || b.sum() <= 0.0 {
+        return Err(Error::Domain("unbalanced OT requires positive total mass"));
+    }
 
     // Follow Séjourné et al. (2019) / GeomLoss: compute divergence from *dual potentials*.
     // This avoids ambiguity about which primal objective a given scaling scheme solves.
@@ -1044,6 +1066,18 @@ pub fn unbalanced_sinkhorn_divergence_general(
     }
     if cost_bb.nrows() != n || cost_bb.ncols() != n {
         return Err(Error::CostShapeMismatch(n, n, cost_bb.nrows(), cost_bb.ncols()));
+    }
+    if reg <= 0.0 || !reg.is_finite() {
+        return Err(Error::InvalidRegularization(reg));
+    }
+    if rho <= 0.0 || !rho.is_finite() {
+        return Err(Error::InvalidMassPenalty(rho));
+    }
+    if a.iter().any(|&x| x < 0.0) || b.iter().any(|&x| x < 0.0) {
+        return Err(Error::Domain("unbalanced OT requires nonnegative masses"));
+    }
+    if a.sum() <= 0.0 || b.sum() <= 0.0 {
+        return Err(Error::Domain("unbalanced OT requires positive total mass"));
     }
 
     fn log_weights(w: &Array1<f32>) -> Array1<f32> {
