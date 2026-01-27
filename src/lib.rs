@@ -78,6 +78,7 @@ use thiserror::Error;
 
 pub mod flow;
 pub mod gromov;
+pub mod semidiscrete;
 pub mod sparse;
 
 pub use flow::{flow_drift, VectorField};
