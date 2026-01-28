@@ -37,7 +37,7 @@
 //! # References
 //!
 //! - Blondel, Seguy, Rolet (2018). "Smooth and Sparse Optimal Transport"
-//!   https://arxiv.org/abs/1710.06276
+//!   <https://arxiv.org/abs/1710.06276>
 
 use crate::{Error, Result};
 use ndarray::{Array1, Array2};
