@@ -522,7 +522,7 @@ pub fn sinkhorn_divergence_general(
 
 /// Create Euclidean cost matrix from point positions.
 ///
-/// C[i,j] = ||x_i - y_j||₂
+/// C\[i,j\] = ||x_i - y_j||₂
 ///
 /// # Arguments
 ///
