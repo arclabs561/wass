@@ -1,81 +1,61 @@
 # wass
 
-Optimal transport primitives for geometry-aware distribution comparison.
-Implements the Sinkhorn algorithm for entropy-regularized OT, including **unbalanced** transport for robust partial matching.
+Optimal transport in Rust. Sinkhorn algorithm, unbalanced transport, sparse transport, Gromov-Wasserstein, semidiscrete OT.
 
-Dual-licensed under MIT or Apache-2.0.
+## What it provides
 
-[crates.io](https://crates.io/crates/wass) | [docs.rs](https://docs.rs/wass)
+| Function | What it does |
+|---|---|
+| `wasserstein_1d` | Closed-form 1D Wasserstein distance, O(n) |
+| `sinkhorn` / `sinkhorn_log` | Entropy-regularized OT (log-domain for stability) |
+| `sinkhorn_divergence_*` | Debiased Sinkhorn divergences (positive, symmetric) |
+| `unbalanced_sinkhorn_*` | Robust OT for partial matching and outliers |
+| `euclidean_cost_matrix` | L2 cost matrix from point clouds |
+| `sq_euclidean_cost_matrix` | Squared L2 cost (correct for W2 OT-CFM) |
+| `sliced_wasserstein` | High-dimensional approximation via random projections |
+| `gromov_wasserstein` | Structure-preserving matching across metric spaces |
+| `semidiscrete::fit_potentials_sgd_neg_dot` | Semidiscrete OT via SGD on dual potentials |
+| `sparse::solve_semidual_l2` | L2-regularized sparse transport plans |
+
+## Usage
+
+```toml
+[dependencies]
+wass = "0.1.0"
+```
 
 ```rust
-use wass::{wasserstein_1d, sinkhorn, unbalanced_sinkhorn_divergence_general};
+use wass::{wasserstein_1d, sinkhorn_log_with_convergence};
 use ndarray::array;
 
-// 1D Wasserstein (fast, closed-form)
-let a = [0.0, 0.25, 0.5, 0.25];
-let b = [0.25, 0.5, 0.25, 0.0];
-let w1 = wasserstein_1d(&a, &b);
+// 1D (closed-form)
+let w1 = wasserstein_1d(&[0.0, 0.5, 0.5], &[0.5, 0.5, 0.0]);
 
-// Unbalanced OT (Robust Document Alignment)
-// Compare two distributions with different supports and outliers.
-// "rho" controls how much we penalize mass creation/destruction.
-let a_weights = array![0.5, 0.5]; // e.g. "AI", "Pizza"
-let b_weights = array![0.5, 0.5]; // e.g. "ML", "Sushi"
-// ... build cost matrices ...
-let div = unbalanced_sinkhorn_divergence_general(
-    &a_weights, &b_weights, 
-    &cost_ab, &cost_aa, &cost_bb, 
-    0.1,  // epsilon (blur)
-    1.0,  // rho (unbalanced penalty)
-    1000, 1e-3
+// General (Sinkhorn, log-domain stable)
+let a = array![0.5, 0.5];
+let b = array![0.5, 0.5];
+let cost = array![[0.0, 1.0], [1.0, 0.0]];
+let (plan, dist, iters) = sinkhorn_log_with_convergence(
+    &a, &b, &cost, 0.1, 1000, 1e-6
 ).unwrap();
 ```
 
-## Key Features
-
-- **Balanced OT**: Standard Sinkhorn for probability distributions.
-- **Unbalanced OT**: Robust transport for partial matches, outliers, and unnormalized measures (e.g. document alignment).
-- **Sparse OT**: L2-regularized transport for interpretable, sparse alignments (via `sparse` module).
-- **Log-domain stabilization**: Numerically stable implementations for small epsilon / large costs.
-- **Divergences**: Proper debiased Sinkhorn divergences (positive, definite) for metric use.
-
 ## Examples
 
-Run these to see OT in action:
+```bash
+cargo run -p wass --example noisy_ocr_matching              # unbalanced OT for document alignment
+cargo run -p wass --example unbalanced_sinkhorn_mass_mismatch # divergence vs mass penalty
+cargo run -p wass --example sinkhorn_divergence_same_support  # balanced divergence
+```
 
-- **Robust Document Alignment**: Shows how unbalanced OT aligns core topics while ignoring outliers (headers/footers/typos).
-  ```bash
-  cargo run -p wass --example noisy_ocr_matching
-  ```
+## Tests
 
-- **Mass Mismatch**: Shows how divergence scales with the unbalanced penalty parameter.
-  ```bash
-  cargo run -p wass --example unbalanced_sinkhorn_mass_mismatch
-  ```
+```bash
+cargo test -p wass
+```
 
-- **Balanced Divergence**:
-  ```bash
-  cargo run -p wass --example sinkhorn_divergence_same_support
-  ```
+30 tests covering Sinkhorn convergence, divergence properties (symmetry, non-negativity, convexity, cost-shift invariance), unbalanced OT behavior, and sparse transport.
 
-## Functions
+## License
 
-| Function | Use Case | Complexity |
-|----------|----------|------------|
-| `wasserstein_1d` | 1D distributions | O(n) |
-| `sinkhorn` | General transport (dense) | O(n^2 x iter) |
-| `sinkhorn_with_convergence` | With early stopping | O(n^2 x iter) |
-| `sinkhorn_divergence_same_support` | Debiased divergence (same support) | O(n^2 x iter) |
-| `sinkhorn_divergence_general` | Debiased divergence (different supports) | O(mn x iter) |
-| `unbalanced_sinkhorn_divergence_general` | Robust comparison (different supports) | O(mn x iter) |
-| `sparse::solve_semidual_l2` | Sparse transport (L2) | O(n^2 x iter) |
-| `sliced_wasserstein` | High-dim approx | O(n_proj x n log n) |
-
-Note: `sinkhorn_divergence` is deprecated; it only computes a true divergence when the
-cost is square. Use the explicit `*_same_support` / `*_general` variants instead.
-
-## Why Optimal Transport?
-
-- **No support issues**: Unlike KL divergence, OT compares distributions with disjoint supports.
-- **Geometry-aware**: Respects the underlying metric space (e.g. word embedding distance).
-- **Robustness**: Unbalanced OT handles outliers and noise ("pizza" vs "sushi") without breaking the alignment of the signal ("AI" vs "ML").
+MIT OR Apache-2.0
