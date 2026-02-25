@@ -17,7 +17,8 @@ fn sinkhorn_log_with_convergence_respects_zero_mass_support() {
     let reg = 0.2;
     let max_iter = 2000;
     let tol = 1e-3;
-    let (plan, _obj, _iters) = wass::sinkhorn_log_with_convergence(&a, &b, &cost, reg, max_iter, tol).unwrap();
+    let (plan, _obj, _iters) =
+        wass::sinkhorn_log_with_convergence(&a, &b, &cost, reg, max_iter, tol).unwrap();
 
     // Row sums should match a (after normalization inside the function, a sums to 1 already).
     let r0 = plan.row(0).sum();
@@ -46,4 +47,3 @@ fn sinkhorn_log_with_convergence_respects_zero_mass_support() {
     assert!(plan[[1, 2]].abs() < 1e-6);
     assert!(plan[[2, 2]].abs() < 1e-6);
 }
-

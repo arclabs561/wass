@@ -36,8 +36,11 @@ fn base_weight(tok: &str) -> f32 {
         return 0.05;
     }
     match tok {
-        "header" | "footer" | "confidential" | "distribute" | "copyright" | "internal" | "memo" => 0.05,
-        "the" | "in" | "of" | "to" | "and" | "a" | "an" | "all" | "on" | "for" | "do" | "not" | "page" | "our" => 0.1,
+        "header" | "footer" | "confidential" | "distribute" | "copyright" | "internal" | "memo" => {
+            0.05
+        }
+        "the" | "in" | "of" | "to" | "and" | "a" | "an" | "all" | "on" | "for" | "do" | "not"
+        | "page" | "our" => 0.1,
         _ => 1.0,
     }
 }
@@ -141,9 +144,10 @@ fn noisy_ocr_expected_pairs_get_mass() {
     let max_iter = 1500;
     let tol = 1e-3;
 
-    let (plan, _obj, _iters) =
-        wass::unbalanced_sinkhorn_log_with_convergence(&w_ref, &w_ocr, &c_ab, reg, rho, max_iter, tol)
-            .unwrap();
+    let (plan, _obj, _iters) = wass::unbalanced_sinkhorn_log_with_convergence(
+        &w_ref, &w_ocr, &c_ab, reg, rho, max_iter, tol,
+    )
+    .unwrap();
 
     fn must_match(
         ref_tokens: &[String],
@@ -175,10 +179,23 @@ fn noisy_ocr_expected_pairs_get_mass() {
         );
     }
 
-    must_match(&ref_tokens, &ocr_tokens, &plan, "quarterly", "qarterly", 0.02);
-    must_match(&ref_tokens, &ocr_tokens, &plan, "earnings", "earnigns", 0.02);
+    must_match(
+        &ref_tokens,
+        &ocr_tokens,
+        &plan,
+        "quarterly",
+        "qarterly",
+        0.02,
+    );
+    must_match(
+        &ref_tokens,
+        &ocr_tokens,
+        &plan,
+        "earnings",
+        "earnigns",
+        0.02,
+    );
     must_match(&ref_tokens, &ocr_tokens, &plan, "showed", "showd", 0.02);
     must_match(&ref_tokens, &ocr_tokens, &plan, "growth", "grwth", 0.02);
     must_match(&ref_tokens, &ocr_tokens, &plan, "sectors", "sectrs", 0.02);
 }
-

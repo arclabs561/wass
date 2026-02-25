@@ -60,8 +60,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (w_a, w_b) = weights_tfidf_2docs(&bow_a, &bow_b);
 
     let dim = 2048;
-    let vec_a: Vec<Array1<f32>> = toks_a.iter().map(|t| embed_char_ngrams_signed(t, dim)).collect();
-    let vec_b: Vec<Array1<f32>> = toks_b.iter().map(|t| embed_char_ngrams_signed(t, dim)).collect();
+    let vec_a: Vec<Array1<f32>> = toks_a
+        .iter()
+        .map(|t| embed_char_ngrams_signed(t, dim))
+        .collect();
+    let vec_b: Vec<Array1<f32>> = toks_b
+        .iter()
+        .map(|t| embed_char_ngrams_signed(t, dim))
+        .collect();
 
     let make_cost = |xs: &[Array1<f32>], ys: &[Array1<f32>]| {
         let m = xs.len();
@@ -89,7 +95,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for &rho in &[0.5, 10.0] {
         println!("--- rho={rho} ---");
-        let div = unbalanced_sinkhorn_divergence_general(&w_a, &w_b, &c_ab, &c_aa, &c_bb, reg, rho, max_iter, tol)?;
+        let div = unbalanced_sinkhorn_divergence_general(
+            &w_a, &w_b, &c_ab, &c_aa, &c_bb, reg, rho, max_iter, tol,
+        )?;
         println!("div={:.4}", div);
 
         // For interpretability we print a few strongest token alignments from the *plan*.

@@ -41,4 +41,3 @@ fn sinkhorn_divergence_monotone_under_interpolation_same_support() {
         prev = d;
     }
 }
-
