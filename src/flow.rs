@@ -31,3 +31,37 @@ pub fn flow_drift(source: &[f64], target: &[f64], dt: f64) -> Vec<f64> {
         .collect()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drift_unit_step() {
+        let v = flow_drift(&[0.0, 0.0], &[1.0, 2.0], 1.0);
+        assert_eq!(v, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn drift_half_step() {
+        let v = flow_drift(&[0.0], &[1.0], 0.5);
+        assert!((v[0] - 2.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn drift_same_point_is_zero() {
+        let v = flow_drift(&[3.0, 4.0], &[3.0, 4.0], 1.0);
+        assert!(v.iter().all(|&x| x.abs() < 1e-10));
+    }
+
+    #[test]
+    #[should_panic(expected = "dt must be non-zero")]
+    fn drift_panics_on_zero_dt() {
+        flow_drift(&[0.0], &[1.0], 0.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "dimension mismatch")]
+    fn drift_panics_on_dim_mismatch() {
+        flow_drift(&[0.0, 1.0], &[1.0], 1.0);
+    }
+}
