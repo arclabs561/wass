@@ -112,6 +112,7 @@ fn main() {
     println!("     permutations and splits mass between them -- this is correct)");
     println!("  - Non-isomorphic graphs: GW distance is higher, plan is more diffuse");
     println!("  - GW only uses internal distances, not coordinates (structure-preserving)");
+    let eps = 0.05;
     println!("  - Entropic regularization (eps={eps:.2}) smooths the plan; smaller eps gives");
-    println!("     sharper assignments but slower convergence", eps = 0.05);
+    println!("     sharper assignments but slower convergence");
 }
