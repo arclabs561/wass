@@ -416,7 +416,9 @@ pub fn earth_mover_distance(a: &Array1<f32>, b: &Array1<f32>, cost: &Array2<f32>
 /// Prefer:
 /// - [`sinkhorn_divergence_same_support`] when supports match
 /// - [`sinkhorn_divergence_general`] when supports differ and you have `cost_ab/cost_aa/cost_bb`
-#[deprecated(note = "Use sinkhorn_divergence_same_support or sinkhorn_divergence_general for a true divergence")]
+#[deprecated(
+    note = "Use sinkhorn_divergence_same_support or sinkhorn_divergence_general for a true divergence"
+)]
 pub fn sinkhorn_divergence(
     a: &Array1<f32>,
     b: &Array1<f32>,
@@ -501,13 +503,28 @@ pub fn sinkhorn_divergence_general(
     let m = a.len();
     let n = b.len();
     if cost_ab.nrows() != m || cost_ab.ncols() != n {
-        return Err(Error::CostShapeMismatch(m, n, cost_ab.nrows(), cost_ab.ncols()));
+        return Err(Error::CostShapeMismatch(
+            m,
+            n,
+            cost_ab.nrows(),
+            cost_ab.ncols(),
+        ));
     }
     if cost_aa.nrows() != m || cost_aa.ncols() != m {
-        return Err(Error::CostShapeMismatch(m, m, cost_aa.nrows(), cost_aa.ncols()));
+        return Err(Error::CostShapeMismatch(
+            m,
+            m,
+            cost_aa.nrows(),
+            cost_aa.ncols(),
+        ));
     }
     if cost_bb.nrows() != n || cost_bb.ncols() != n {
-        return Err(Error::CostShapeMismatch(n, n, cost_bb.nrows(), cost_bb.ncols()));
+        return Err(Error::CostShapeMismatch(
+            n,
+            n,
+            cost_bb.nrows(),
+            cost_bb.ncols(),
+        ));
     }
 
     let (_p_pq, ot_pq, _iters_pq) =
@@ -549,6 +566,44 @@ pub fn euclidean_cost_matrix(x: &Array2<f32>, y: &Array2<f32>) -> Array2<f32> {
                 dist_sq += diff * diff;
             }
             cost[[i, j]] = dist_sq.sqrt();
+        }
+    }
+
+    cost
+}
+
+/// Create **squared** Euclidean cost matrix from point positions.
+///
+/// C\[i,j\] = ||x_i - y_j||₂²
+///
+/// This is the standard ground cost for 2-Wasserstein (W2) optimal transport,
+/// and the correct cost for OT-CFM flow matching (Tong et al. 2023).
+///
+/// # Arguments
+///
+/// * `x` - Source points (m x d)
+/// * `y` - Target points (n x d)
+///
+/// # Returns
+///
+/// Cost matrix (m x n) where each entry is the squared Euclidean distance.
+pub fn sq_euclidean_cost_matrix(x: &Array2<f32>, y: &Array2<f32>) -> Array2<f32> {
+    let m = x.nrows();
+    let n = y.nrows();
+    let d = x.ncols();
+
+    assert_eq!(y.ncols(), d, "point dimensions must match");
+
+    let mut cost = Array2::zeros((m, n));
+
+    for i in 0..m {
+        for j in 0..n {
+            let mut dist_sq = 0.0;
+            for k in 0..d {
+                let diff = x[[i, k]] - y[[j, k]];
+                dist_sq += diff * diff;
+            }
+            cost[[i, j]] = dist_sq;
         }
     }
 
@@ -896,7 +951,7 @@ pub fn unbalanced_sinkhorn_log_with_convergence(
                             continue;
                         }
                         let log_k = -cij / (reg as f64);
-                        kl_plan += pij * ((pij.ln() - log_k)) - pij;
+                        kl_plan += pij * (pij.ln() - log_k) - pij;
                     }
                 }
                 kl_plan += sum_k;
@@ -1073,13 +1128,28 @@ pub fn unbalanced_sinkhorn_divergence_general(
     let m = a.len();
     let n = b.len();
     if cost_ab.nrows() != m || cost_ab.ncols() != n {
-        return Err(Error::CostShapeMismatch(m, n, cost_ab.nrows(), cost_ab.ncols()));
+        return Err(Error::CostShapeMismatch(
+            m,
+            n,
+            cost_ab.nrows(),
+            cost_ab.ncols(),
+        ));
     }
     if cost_aa.nrows() != m || cost_aa.ncols() != m {
-        return Err(Error::CostShapeMismatch(m, m, cost_aa.nrows(), cost_aa.ncols()));
+        return Err(Error::CostShapeMismatch(
+            m,
+            m,
+            cost_aa.nrows(),
+            cost_aa.ncols(),
+        ));
     }
     if cost_bb.nrows() != n || cost_bb.ncols() != n {
-        return Err(Error::CostShapeMismatch(n, n, cost_bb.nrows(), cost_bb.ncols()));
+        return Err(Error::CostShapeMismatch(
+            n,
+            n,
+            cost_bb.nrows(),
+            cost_bb.ncols(),
+        ));
     }
     if reg <= 0.0 || !reg.is_finite() {
         return Err(Error::InvalidRegularization(reg));
@@ -1186,12 +1256,14 @@ pub fn unbalanced_sinkhorn_divergence_general(
     }
 
     let scale = rho + eps / 2.0;
-    
+
     // Term A: <a, (-f_aa/rho).exp() - (-f_ba/rho).exp()>
     let mut term_a: f64 = 0.0;
     for i in 0..m {
         let ai = a[i] as f64;
-        if ai == 0.0 { continue; }
+        if ai == 0.0 {
+            continue;
+        }
         let x = (-f_aa[i] / rho).exp() - (-f_ba[i] / rho).exp();
         term_a += ai * (scale as f64) * (x as f64);
     }
@@ -1200,7 +1272,9 @@ pub fn unbalanced_sinkhorn_divergence_general(
     let mut term_b: f64 = 0.0;
     for j in 0..n {
         let bj = b[j] as f64;
-        if bj == 0.0 { continue; }
+        if bj == 0.0 {
+            continue;
+        }
         let x = (-g_bb[j] / rho).exp() - (-g_ab[j] / rho).exp();
         term_b += bj * (scale as f64) * (x as f64);
     }
@@ -1248,13 +1322,13 @@ pub fn sliced_wasserstein(x: &Array2<f32>, y: &Array2<f32>, n_projections: usize
         for i in 0..d {
             direction[i] = StandardNormal.sample(&mut rng);
         }
-        
+
         // Optimize: use innr for dot product if available
         #[cfg(feature = "simd")]
         let norm = innr::dense::norm(direction.as_slice().unwrap());
         #[cfg(not(feature = "simd"))]
         let norm = direction.dot(&direction).sqrt();
-        
+
         direction /= norm.max(EPSILON);
 
         // 2. Project points
@@ -1262,17 +1336,23 @@ pub fn sliced_wasserstein(x: &Array2<f32>, y: &Array2<f32>, n_projections: usize
         let mut proj_x = Vec::with_capacity(m);
         #[cfg(feature = "simd")]
         for i in 0..m {
-            proj_x.push(innr::dense::dot(x.row(i).as_slice().unwrap(), direction.as_slice().unwrap()));
+            proj_x.push(innr::dense::dot(
+                x.row(i).as_slice().unwrap(),
+                direction.as_slice().unwrap(),
+            ));
         }
-        
+
         #[cfg(not(feature = "simd"))]
         let mut proj_x = x.dot(&direction).to_vec();
-        
+
         #[cfg(feature = "simd")]
         let mut proj_y = Vec::with_capacity(n);
         #[cfg(feature = "simd")]
         for i in 0..n {
-            proj_y.push(innr::dense::dot(y.row(i).as_slice().unwrap(), direction.as_slice().unwrap()));
+            proj_y.push(innr::dense::dot(
+                y.row(i).as_slice().unwrap(),
+                direction.as_slice().unwrap(),
+            ));
         }
 
         #[cfg(not(feature = "simd"))]
@@ -1372,6 +1452,41 @@ mod tests {
     }
 
     #[test]
+    fn test_sq_euclidean_cost_matrix() {
+        let x = array![[0.0, 0.0], [1.0, 0.0]];
+        let y = array![[0.0, 0.0], [0.0, 1.0]];
+
+        let cost = sq_euclidean_cost_matrix(&x, &y);
+
+        assert!((cost[[0, 0]] - 0.0).abs() < 1e-7);
+        assert!((cost[[0, 1]] - 1.0).abs() < 1e-7); // ||[0,0] - [0,1]||^2 = 1
+        assert!((cost[[1, 0]] - 1.0).abs() < 1e-7); // ||[1,0] - [0,0]||^2 = 1
+        assert!((cost[[1, 1]] - 2.0).abs() < 1e-7); // ||[1,0] - [0,1]||^2 = 2
+    }
+
+    #[test]
+    fn test_sq_vs_euclidean_cost_matrix() {
+        // sq cost should be euclidean cost squared element-wise.
+        let x = array![[0.0, 0.0], [1.0, 0.5], [0.3, -0.7]];
+        let y = array![[0.5, 0.5], [-1.0, 0.0], [0.0, 1.0]];
+
+        let l2 = euclidean_cost_matrix(&x, &y);
+        let sq = sq_euclidean_cost_matrix(&x, &y);
+
+        for i in 0..3 {
+            for j in 0..3 {
+                let expected = l2[[i, j]] * l2[[i, j]];
+                assert!(
+                    (sq[[i, j]] - expected).abs() < 1e-5,
+                    "mismatch at ({i},{j}): sq={} expected={}",
+                    sq[[i, j]],
+                    expected
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_sliced_wasserstein() {
         let x = array![[0.0, 0.0], [1.0, 1.0]];
         let y = array![[0.0, 0.0], [1.0, 1.0]];
@@ -1400,13 +1515,13 @@ mod tests {
             let n = a.len();
             let mut a_dist = Array1::from_vec(a);
             let mut b_dist = Array1::from_vec(b);
-            
+
             // Normalize
             let sa = a_dist.sum();
             let sb = b_dist.sum();
             if sa > 0.0 { a_dist /= sa; } else { a_dist[0] = 1.0; }
             if sb > 0.0 { b_dist /= sb; } else { b_dist[0] = 1.0; }
-            
+
             let mut cost = Array2::zeros((n, n));
             for i in 0..n {
                 for j in 0..n {
@@ -1455,11 +1570,7 @@ mod tests {
     #[test]
     fn sinkhorn_divergence_zero_on_diagonal_same_support() {
         let a = array![0.2, 0.3, 0.5];
-        let cost = array![
-            [0.0, 1.0, 2.0],
-            [1.0, 0.0, 1.0],
-            [2.0, 1.0, 0.0]
-        ];
+        let cost = array![[0.0, 1.0, 2.0], [1.0, 0.0, 1.0], [2.0, 1.0, 0.0]];
         let div = sinkhorn_divergence_same_support(&a, &a, &cost, 0.1, 500, 1e-4).unwrap();
         assert!(div.abs() < 1e-5, "div={}", div);
     }
@@ -1468,11 +1579,7 @@ mod tests {
     fn sinkhorn_divergence_is_symmetric_same_support() {
         let a = array![0.2, 0.3, 0.5];
         let b = array![0.5, 0.4, 0.1];
-        let cost = array![
-            [0.0, 1.0, 2.0],
-            [1.0, 0.0, 1.0],
-            [2.0, 1.0, 0.0]
-        ];
+        let cost = array![[0.0, 1.0, 2.0], [1.0, 0.0, 1.0], [2.0, 1.0, 0.0]];
         let ab = sinkhorn_divergence_same_support(&a, &b, &cost, 0.1, 500, 1e-4).unwrap();
         let ba = sinkhorn_divergence_same_support(&b, &a, &cost, 0.1, 500, 1e-4).unwrap();
         assert!((ab - ba).abs() < 1e-5, "ab={} ba={}", ab, ba);
