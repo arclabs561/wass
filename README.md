@@ -2,6 +2,46 @@
 
 Optimal transport in Rust. Sinkhorn algorithm, unbalanced transport, sparse transport, Gromov-Wasserstein, semidiscrete OT.
 
+## Problem
+
+You have two distributions (point clouds, histograms, token sequences) and need to measure how far apart they are, or find the cheapest way to move mass from one to the other. Optimal transport gives a principled answer: the minimum-cost coupling between the two. This library provides the algorithms.
+
+## Examples
+
+**Noisy OCR alignment**. Given a clean reference and a noisy OCR scan with headers/footers, unbalanced Sinkhorn matches the real tokens while ignoring the junk:
+
+```bash
+cargo run --example noisy_ocr_matching
+```
+
+```text
+Reference (9 tokens): "The quarterly earnings showed steady growth in all sectors"
+Noisy OCR (20 tokens): "HEADER: CONFIDENTIAL 2025 The qarterly earnigns ..."
+
+Aligning with Unbalanced Sinkhorn (epsilon=0.1)
+Rho    Divergence Interpretation
+------------------------------------------------------------
+0.5    0.3150     Ignores outliers (robust)
+  credible matches (p>=0.02, dist<=0.70):
+    quarterly       -> qarterly         p=0.12  dist=0.38
+    earnings        -> earnigns         p=0.10  dist=0.49
+    showed          -> showd            p=0.10  dist=0.50
+    growth          -> grwth            p=0.10  dist=0.48
+    sectors         -> sectrs           p=0.11  dist=0.43
+```
+
+**Structure-preserving graph matching**. Gromov-Wasserstein aligns two metric spaces by their internal distance structure, without requiring them to share a common embedding:
+
+```bash
+cargo run --example gromov_wasserstein_graph_match
+```
+
+**Sparse vs. dense plans**. L2-regularized sparse transport plans vs. entropic Sinkhorn plans -- sparse plans have exact zeros, useful when you want hard assignments:
+
+```bash
+cargo run --example sparse_vs_sinkhorn
+```
+
 ## What it provides
 
 | Function | What it does |
@@ -38,16 +78,6 @@ let cost = array![[0.0, 1.0], [1.0, 0.0]];
 let (plan, dist, iters) = sinkhorn_log_with_convergence(
     &a, &b, &cost, 0.1, 1000, 1e-6
 ).unwrap();
-```
-
-## Examples
-
-```bash
-cargo run -p wass --example noisy_ocr_matching              # unbalanced OT for document alignment
-cargo run -p wass --example unbalanced_sinkhorn_mass_mismatch # divergence vs mass penalty
-cargo run -p wass --example sinkhorn_divergence_same_support  # balanced divergence
-cargo run -p wass --example sparse_vs_sinkhorn               # L2 sparse plans vs entropic dense plans
-cargo run -p wass --example gromov_wasserstein_graph_match   # structure-preserving alignment of metric spaces
 ```
 
 ## Tests
