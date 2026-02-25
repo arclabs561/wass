@@ -111,7 +111,7 @@ pub fn fit_potentials_sgd_neg_dot(
     let mut g = Array1::<f32>::zeros(n);
 
     // Center g to reduce drift (potentials are identifiable up to a constant).
-    let mut center = |g: &mut Array1<f32>| {
+    let center = |g: &mut Array1<f32>| {
         let m = g.mean().unwrap_or(0.0);
         *g -= m;
     };
