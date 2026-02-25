@@ -150,25 +150,38 @@ fn logsumexp_by(len: usize, mut f: impl FnMut(usize) -> f32) -> f32 {
     max_val + sum_exp.ln()
 }
 
-/// 1D Wasserstein distance (Earth Mover's Distance).
+/// 1D Wasserstein distance (Earth Mover's Distance) via CDF integration.
 ///
-/// For 1D distributions, the Wasserstein distance has a closed-form solution
-/// based on the cumulative distribution functions (CDFs).
+/// The 1D Wasserstein-1 distance admits a closed-form solution (Vallender, 1974):
 ///
-/// W₁(a, b) = ∫|F_a(x) - F_b(x)| dx
+/// \[
+/// W_1(a, b) = \sum_{i} |F_a(i) - F_b(i)|
+/// \]
+///
+/// where \(F_a, F_b\) are the cumulative distribution functions.
+///
+/// **Intuition**: imagine two histograms as piles of sand on a line. \(W_1\) is the
+/// minimum total work (mass times distance) to reshape one pile into the other.
+/// In 1D, the optimal plan is uniquely determined by the CDFs -- no linear program needed.
+///
+/// **Properties**:
+/// - \(W_1(a, b) \ge 0\), with equality iff \(a = b\)
+/// - Symmetric: \(W_1(a, b) = W_1(b, a)\)
+/// - Satisfies the triangle inequality (it is a true metric on distributions)
+/// - Metrizes weak convergence + convergence of first moments
 ///
 /// # Arguments
 ///
-/// * `a` - First distribution (histogram/PMF)
-/// * `b` - Second distribution (histogram/PMF)
+/// * `a` - First distribution (histogram/PMF over shared bins)
+/// * `b` - Second distribution (histogram/PMF over shared bins)
 ///
 /// # Returns
 ///
-/// W₁ distance (assumes unit spacing between bins)
+/// \(W_1\) distance (assumes unit spacing between bins).
 ///
 /// # Complexity
 ///
-/// O(n log n) for sorting, O(n) for integration
+/// \(O(n)\) -- single pass over the CDFs.
 ///
 /// # Example
 ///
@@ -209,32 +222,43 @@ pub fn wasserstein_1d(a: &[f32], b: &[f32]) -> f32 {
         .sum()
 }
 
-/// Sinkhorn algorithm for entropic regularized optimal transport.
+/// Sinkhorn algorithm for entropic-regularized optimal transport (matrix scaling).
 ///
-/// Solves the regularized transport problem:
+/// Solves the regularized Kantorovich problem (Cuturi, 2013):
 ///
-/// min_P <C, P> - ε H(P)
-/// s.t. P1 = a, P^T1 = b, P ≥ 0
+/// \[
+/// \min_{P \in U(a,b)} \langle C, P \rangle + \varepsilon H(P)
+/// \]
 ///
-/// where H(P) = -Σ P_ij log P_ij is the entropy.
+/// where \(U(a,b) = \{P \ge 0 : P\mathbf{1} = a,\; P^\top\mathbf{1} = b\}\) is
+/// the transport polytope and \(H(P) = -\sum_{ij} P_{ij} \log P_{ij}\) is the entropy.
+///
+/// **Algorithm**: alternating Bregman projections (matrix scaling). At each step:
+/// \(u \leftarrow a / (Kv)\), then \(v \leftarrow b / (K^\top u)\),
+/// where \(K_{ij} = \exp(-C_{ij}/\varepsilon)\). The optimal plan is
+/// \(P^* = \mathrm{diag}(u)\, K\, \mathrm{diag}(v)\).
+///
+/// **Convergence**: linear rate \(O(\lambda^k)\) where \(\lambda < 1\) depends on the
+/// Hilbert metric of \(K\). Smaller \(\varepsilon\) means slower convergence and
+/// potential numerical underflow in \(K\). For small \(\varepsilon\), prefer [`sinkhorn_log`].
 ///
 /// # Arguments
 ///
-/// * `a` - Source distribution (length m)
-/// * `b` - Target distribution (length n)
-/// * `cost` - Cost matrix C (m × n)
-/// * `reg` - Regularization strength ε (smaller = closer to exact)
-/// * `max_iter` - Maximum iterations
+/// * `a` - Source distribution (length m, must sum to 1)
+/// * `b` - Target distribution (length n, must sum to 1)
+/// * `cost` - Cost matrix \(C\) (m x n)
+/// * `reg` - Regularization strength \(\varepsilon > 0\) (smaller = closer to exact OT)
+/// * `max_iter` - Maximum Sinkhorn iterations
 ///
 /// # Returns
 ///
-/// (transport_plan, transport_distance) where:
-/// - transport_plan: P matrix (m × n) giving how much mass moves
-/// - transport_distance: <C, P> = Σ C_ij P_ij
+/// `(plan, distance)` where:
+/// - `plan`: transport plan \(P^*\) (m x n), satisfying \(P^*\mathbf{1} \approx a\)
+/// - `distance`: transport cost \(\langle C, P^* \rangle\)
 ///
 /// # Complexity
 ///
-/// O(m × n × iterations)
+/// \(O(mn \cdot \text{iterations})\). Each iteration is a matrix-vector product.
 ///
 /// # Example
 ///
@@ -376,34 +400,42 @@ pub fn sinkhorn_with_convergence(
     Err(Error::SinkhornNotConverged(max_iter))
 }
 
-/// Earth mover's distance with custom ground metric.
+/// Approximate Earth Mover's Distance (EMD) via log-domain Sinkhorn.
 ///
-/// Computes W₁(a, b) where ground metric is given by the cost matrix.
-/// Uses Sinkhorn with small regularization as approximation.
+/// Computes \(W_1(a, b) \approx \min_{P \in U(a,b)} \langle C, P \rangle\)
+/// using entropic regularization with \(\varepsilon = 0.01\).
 ///
-/// For exact solution, use linear programming (not implemented here).
+/// The exact EMD requires solving a linear program (\(O(n^3)\) network simplex).
+/// This function uses [`sinkhorn_log`] as a fast approximation -- the result is
+/// biased upward by \(O(\varepsilon \log n)\) due to the entropy penalty.
 ///
 /// # Arguments
 ///
-/// * `a` - Source distribution
-/// * `b` - Target distribution
-/// * `cost` - Ground metric / cost matrix
-///
-/// # Returns
-///
-/// Approximate EMD
+/// * `a` - Source distribution (sums to 1)
+/// * `b` - Target distribution (sums to 1)
+/// * `cost` - Ground cost matrix \(C_{ij}\)
 pub fn earth_mover_distance(a: &Array1<f32>, b: &Array1<f32>, cost: &Array2<f32>) -> f32 {
     let reg = 0.01; // Small regularization for good approximation
     let (_, distance) = sinkhorn_log(a, b, cost, reg, 200);
     distance
 }
 
-/// Sinkhorn Divergence (De-biased Entropic OT).
+/// Sinkhorn Divergence (de-biased entropic OT).
 ///
-/// Formula: S_ε(p, q) = OT_ε(p, q) - 1/2 * (OT_ε(p, p) + OT_ε(q, q))
+/// \[
+/// S_\varepsilon(a, b) = \mathrm{OT}_\varepsilon(a, b)
+///     - \tfrac{1}{2}\bigl(\mathrm{OT}_\varepsilon(a, a) + \mathrm{OT}_\varepsilon(b, b)\bigr)
+/// \]
 ///
-/// This provides a positive-definite divergence that interpolates between
-/// Wasserstein distance (ε → 0) and Maximum Mean Discrepancy (ε → ∞).
+/// **Why de-bias?** Raw entropic OT \(\mathrm{OT}_\varepsilon(a, b)\) is biased:
+/// \(\mathrm{OT}_\varepsilon(a, a) > 0\) even when \(a = b\). The self-transport
+/// terms correct this, yielding a proper divergence (\(S_\varepsilon(a, a) = 0\)).
+///
+/// **Interpolation** (Feydy et al., 2018): as \(\varepsilon \to 0\),
+/// \(S_\varepsilon \to W_p^p\) (Wasserstein); as \(\varepsilon \to \infty\),
+/// \(S_\varepsilon \to \text{MMD}^2\) (Maximum Mean Discrepancy with the
+/// cost kernel). This makes it a smooth bridge between geometry-aware and
+/// kernel-based distribution comparison.
 ///
 /// # Warning
 ///
@@ -449,15 +481,17 @@ pub fn sinkhorn_divergence(
     }
 }
 
-/// Correct Sinkhorn divergence when `a` and `b` live on the **same support**.
+/// De-biased Sinkhorn divergence for distributions on the **same support**.
 ///
-/// Preconditions:
-/// - `a.len() == b.len() == n`
-/// - `cost` is square `n×n` and encodes the ground cost on that shared support
+/// Computes \(S_\varepsilon(a, b) = \mathrm{OT}_\varepsilon(a,b) - \tfrac{1}{2}(\mathrm{OT}_\varepsilon(a,a) + \mathrm{OT}_\varepsilon(b,b))\).
 ///
-/// This is the proper de-biased entropic OT divergence from:
-/// - Feydy et al. (2018), "Interpolating between Optimal Transport and MMD using Sinkhorn Divergences"
-/// - Genevay et al. (2018), "Sample Complexity of Sinkhorn divergences"
+/// **Preconditions**: `a.len() == b.len() == n`, `cost` is \(n \times n\).
+///
+/// **Properties** (Feydy et al., 2018):
+/// - \(S_\varepsilon(a, a) = 0\) (zero self-divergence)
+/// - \(S_\varepsilon(a, b) \ge 0\) (positive definite)
+/// - Symmetric: \(S_\varepsilon(a, b) = S_\varepsilon(b, a)\)
+/// - Metrizes weak convergence for fixed \(\varepsilon > 0\)
 ///
 /// Returns an error rather than silently producing a biased quantity.
 pub fn sinkhorn_divergence_same_support(
@@ -610,12 +644,28 @@ pub fn sq_euclidean_cost_matrix(x: &Array2<f32>, y: &Array2<f32>) -> Array2<f32>
     cost
 }
 
-/// Sinkhorn algorithm in log-space for numerical stability.
+/// Log-domain Sinkhorn algorithm for entropic optimal transport.
 ///
-/// Solves entropic OT using log-domain computations to avoid underflow/overflow.
-/// Formula: f_i = ε log(a_i) - ε log(Σ exp((g_j - C_ij) / ε))
+/// Solves the same problem as [`sinkhorn`] but in log-space, avoiding the
+/// numerical underflow that plagues the matrix-scaling version when
+/// \(\varepsilon\) is small relative to the cost range.
 ///
-/// This implementation uses log-sum-exp trick for stability and **normalizes** distributions.
+/// **Log-domain update** (dual potentials \(f, g\)):
+/// \[
+/// f_i \leftarrow \varepsilon \log a_i - \varepsilon \operatorname{LSE}_j\!\bigl(\tfrac{g_j - C_{ij}}{\varepsilon}\bigr)
+/// \]
+/// \[
+/// g_j \leftarrow \varepsilon \log b_j - \varepsilon \operatorname{LSE}_i\!\bigl(\tfrac{f_i - C_{ij}}{\varepsilon}\bigr)
+/// \]
+///
+/// The transport plan is recovered as
+/// \(P_{ij} = \exp\bigl(\tfrac{f_i + g_j - C_{ij}}{\varepsilon}\bigr)\).
+///
+/// **When to use this vs [`sinkhorn`]**: always prefer this when \(\varepsilon < 0.1 \cdot \max(C)\),
+/// or when cost entries vary over several orders of magnitude. The log-domain version
+/// replaces `exp` followed by division with `log-sum-exp`, which is unconditionally stable.
+///
+/// This implementation **normalizes** input distributions internally.
 ///
 /// If you need a convergence check against marginal constraints (and an error on failure),
 /// use [`sinkhorn_log_with_convergence`].
@@ -1283,20 +1333,28 @@ pub fn unbalanced_sinkhorn_divergence_general(
     Ok((term_a + term_b) as f32 + mass_corr)
 }
 
-/// Sliced Wasserstein distance (fast approximation for high dimensions).
+/// Sliced Wasserstein distance -- a scalable approximation for high dimensions.
 ///
-/// Projects distributions onto random 1D subspaces and averages W₁ distances.
-/// This uses Gaussian random projections to estimate the distance.
+/// \[
+/// \mathrm{SW}_1(X, Y) = \mathbb{E}_{\theta \sim S^{d-1}}\bigl[W_1(\theta^\top X,\; \theta^\top Y)\bigr]
+/// \]
+///
+/// **Idea** (Rabin et al., 2012; Bonneel et al., 2015): project both point clouds
+/// onto random 1D directions \(\theta\), compute the exact 1D \(W_1\) (which is
+/// just sorting + CDF integration), and average over projections.
+///
+/// **Why**: full \(W_1\) in \(d\) dimensions requires \(O(n^3)\) (linear program)
+/// or \(O(n^2 k)\) (Sinkhorn). Sliced \(W_1\) costs only
+/// \(O(L \cdot n \log n)\) where \(L\) is the number of projections.
+///
+/// **Trade-off**: the approximation is unbiased but has variance \(O(1/L)\).
+/// For \(L \ge 50\) the estimate is usually stable. Larger \(d\) may need more projections.
 ///
 /// # Arguments
 ///
-/// * `x` - Source samples (m × d)
-/// * `y` - Target samples (n × d)
-/// * `n_projections` - Number of random projections
-///
-/// # Returns
-///
-/// Sliced Wasserstein distance
+/// * `x` - Source point cloud (\(m \times d\))
+/// * `y` - Target point cloud (\(n \times d\))
+/// * `n_projections` - Number of random 1D directions \(L\)
 pub fn sliced_wasserstein(x: &Array2<f32>, y: &Array2<f32>, n_projections: usize) -> f32 {
     let d = x.ncols();
     assert_eq!(y.ncols(), d, "point dimensions must match");
