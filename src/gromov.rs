@@ -1,14 +1,49 @@
-//! Entropic Gromov-Wasserstein Optimal Transport.
+//! Entropic Gromov-Wasserstein optimal transport.
 //!
-//! Matches two metric spaces (X, C1) and (Y, C2) by finding a transport plan P
-//! that minimizes the distortion between their structures.
+//! Gromov-Wasserstein (Memoli, 2011) matches two **metric spaces** \((X, C_1)\) and
+//! \((Y, C_2)\) without requiring them to share an ambient space. It finds a transport
+//! plan \(P\) that minimizes the quadratic distortion:
 //!
-//! Metric: $GW(C_1, C_2) = \min_P \sum_{ijkl} |C_1(i,k) - C_2(j,l)|^2 P_{ij} P_{kl} - \epsilon H(P)$
+//! \[
+//! \mathrm{GW}(C_1, C_2) = \min_{P \in U(p,q)} \sum_{i,j,k,l} |C_1(i,k) - C_2(j,l)|^2 P_{ij} P_{kl} + \varepsilon H(P)
+//! \]
+//!
+//! **Intuition**: GW measures how much the *internal structure* of two spaces differs.
+//! If two graphs have the same topology but different node labels, GW will still find
+//! the correct alignment -- it only cares about pairwise distances, not coordinates.
+//!
+//! **Applications**: shape matching, cross-lingual word embedding alignment,
+//! graph comparison, protein structure alignment.
+//!
+//! **Algorithm**: projected gradient descent -- at each outer iteration, linearize the
+//! quadratic objective to get a linear cost matrix \(G\), then solve the linearized
+//! problem with Sinkhorn. This is a.k.a. the "Frank-Wolfe" or "conditional gradient" scheme.
+//!
+//! ## References
+//!
+//! - Memoli (2011). "Gromov-Wasserstein Distances and Metric Measure Spaces"
+//! - Peyre, Cuturi, Solomon (2016). "Gromov-Wasserstein Averaging"
+//! - Peyre & Cuturi (2019). "Computational Optimal Transport", Ch. 10
 
 use crate::{sinkhorn_log, Error, Result};
 use ndarray::{Array1, Array2};
 
-/// Compute the Entropic Gromov-Wasserstein discrepancy and transport plan.
+/// Compute the entropic Gromov-Wasserstein discrepancy and transport plan.
+///
+/// Given intra-space cost matrices \(C_1 \in \mathbb{R}^{m \times m}\) and
+/// \(C_2 \in \mathbb{R}^{n \times n}\), marginals \(p \in \Delta^m\) and
+/// \(q \in \Delta^n\), and entropic regularization \(\varepsilon\), returns
+/// the GW transport plan \(P^*\) and the associated distortion cost.
+///
+/// # Arguments
+///
+/// * `c1` - Intra-space distance matrix for space \(X\) (\(m \times m\), symmetric)
+/// * `c2` - Intra-space distance matrix for space \(Y\) (\(n \times n\), symmetric)
+/// * `p` - Source marginal (length \(m\), sums to 1)
+/// * `q` - Target marginal (length \(n\), sums to 1)
+/// * `epsilon` - Entropic regularization \(\varepsilon > 0\)
+/// * `max_iter` - Outer (Frank-Wolfe) iterations
+/// * `sinkhorn_iter` - Inner Sinkhorn iterations per linearization
 pub fn gromov_wasserstein(
     c1: &Array2<f64>,
     c2: &Array2<f64>,
