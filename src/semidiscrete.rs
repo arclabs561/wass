@@ -38,7 +38,11 @@ impl Default for SemidiscreteSgdConfig {
 /// Compute scores for a single `x` against all `y_j` using a negative dot-product cost.
 ///
 /// Returns `g_j + <x, y_j>`.
-pub fn scores_neg_dot(x: &ArrayView1<f32>, y: &ArrayView2<f32>, g: &ArrayView1<f32>) -> Array1<f32> {
+pub fn scores_neg_dot(
+    x: &ArrayView1<f32>,
+    y: &ArrayView2<f32>,
+    g: &ArrayView1<f32>,
+) -> Array1<f32> {
     let n = y.nrows();
     debug_assert_eq!(g.len(), n);
     let mut out = Array1::zeros(n);
@@ -166,3 +170,91 @@ pub fn fit_potentials_sgd_neg_dot(
     Ok(g)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::{array, Array2};
+
+    #[test]
+    fn scores_neg_dot_basic() {
+        let x = array![1.0, 0.0];
+        let y = array![[1.0, 0.0], [0.0, 1.0]];
+        let g = array![0.0, 0.0];
+        let s = scores_neg_dot(&x.view(), &y.view(), &g.view());
+        // s[0] = 0 + <[1,0],[1,0]> = 1; s[1] = 0 + <[1,0],[0,1]> = 0
+        assert!((s[0] - 1.0).abs() < 1e-6);
+        assert!(s[1].abs() < 1e-6);
+    }
+
+    #[test]
+    fn scores_neg_dot_with_potentials() {
+        let x = array![1.0, 0.0];
+        let y = array![[1.0, 0.0], [0.0, 1.0]];
+        let g = array![-2.0, 3.0]; // bias toward y[1]
+        let s = scores_neg_dot(&x.view(), &y.view(), &g.view());
+        // s[0] = -2 + 1 = -1; s[1] = 3 + 0 = 3
+        assert!((s[0] - (-1.0)).abs() < 1e-6);
+        assert!((s[1] - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn assign_hard_argmax() {
+        let scores = array![0.1, 0.9, 0.5];
+        assert_eq!(assign_hard_from_scores(&scores.view()), 1);
+    }
+
+    #[test]
+    fn assign_hard_first_wins_tie() {
+        // Strict > means first element wins on tie
+        let scores = array![0.5, 0.5, 0.5];
+        assert_eq!(assign_hard_from_scores(&scores.view()), 0);
+    }
+
+    #[test]
+    fn config_default_is_sane() {
+        let cfg = SemidiscreteSgdConfig::default();
+        assert_eq!(cfg.epsilon, 0.0);
+        assert!(cfg.lr > 0.0);
+        assert!(cfg.steps > 0);
+        assert!(cfg.batch_size > 0);
+    }
+
+    #[test]
+    fn fit_potentials_rejects_bad_inputs() {
+        let y = Array2::<f32>::zeros((3, 2));
+        let b = array![0.5, 0.5]; // wrong length
+        let cfg = SemidiscreteSgdConfig::default();
+        assert!(fit_potentials_sgd_neg_dot(&y.view(), &b.view(), &cfg).is_err());
+    }
+
+    #[test]
+    fn fit_potentials_runs_and_returns() {
+        // 2 targets in 2D, uniform weights
+        let y = array![[1.0, 0.0], [0.0, 1.0]];
+        let b = array![0.5, 0.5];
+        let cfg = SemidiscreteSgdConfig {
+            steps: 100,
+            batch_size: 64,
+            ..Default::default()
+        };
+        let g = fit_potentials_sgd_neg_dot(&y.view(), &b.view(), &cfg).unwrap();
+        assert_eq!(g.len(), 2);
+        // Potentials are centered (mean ~0)
+        assert!(g.mean().unwrap().abs() < 1e-3, "g should be centered: {:?}", g);
+    }
+
+    #[test]
+    fn fit_potentials_is_deterministic() {
+        let y = array![[1.0, 0.0], [-1.0, 0.0]];
+        let b = array![0.5, 0.5];
+        let cfg = SemidiscreteSgdConfig {
+            steps: 50,
+            batch_size: 32,
+            seed: 123,
+            ..Default::default()
+        };
+        let g1 = fit_potentials_sgd_neg_dot(&y.view(), &b.view(), &cfg).unwrap();
+        let g2 = fit_potentials_sgd_neg_dot(&y.view(), &b.view(), &cfg).unwrap();
+        assert_eq!(g1, g2, "same seed should give same result");
+    }
+}

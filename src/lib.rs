@@ -1568,6 +1568,27 @@ mod tests {
     }
 
     #[test]
+    fn earth_mover_distance_identical_is_zero() {
+        let a = array![0.5, 0.5];
+        let cost = array![[0.0, 1.0], [1.0, 0.0]];
+        let emd = earth_mover_distance(&a, &a, &cost);
+        assert!(emd < 0.05, "identical distributions: emd={}", emd);
+    }
+
+    #[test]
+    fn earth_mover_distance_shifted_distributions() {
+        // earth_mover_distance uses sinkhorn (not log-domain) with reg=0.01,
+        // so cost entries must be small enough to avoid underflow in exp(-C/reg).
+        let a = array![0.7, 0.3];
+        let b = array![0.3, 0.7];
+        let cost = array![[0.0, 0.01], [0.01, 0.0]];
+        let emd = earth_mover_distance(&a, &b, &cost);
+        // Moving 0.4 mass a distance of 0.01 => cost ~0.004
+        assert!(emd > 1e-4, "shifted distributions should have positive cost: emd={}", emd);
+        assert!(emd < 0.1, "cost bounded: emd={}", emd);
+    }
+
+    #[test]
     fn sinkhorn_divergence_zero_on_diagonal_same_support() {
         let a = array![0.2, 0.3, 0.5];
         let cost = array![[0.0, 1.0, 2.0], [1.0, 0.0, 1.0], [2.0, 1.0, 0.0]];
