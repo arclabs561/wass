@@ -424,6 +424,43 @@ mod tests {
     }
 
     #[test]
+    fn sparsity_all_zeros() {
+        let plan = Array2::zeros((3, 3));
+        assert!((sparsity(&plan, 1e-10) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn sparsity_all_nonzero() {
+        let plan = Array2::from_elem((3, 3), 0.5);
+        assert!(sparsity(&plan, 1e-10) < 1e-10);
+    }
+
+    #[test]
+    fn sparsity_half_zero() {
+        let plan = array![[0.0, 0.5], [0.5, 0.0]];
+        let s = sparsity(&plan, 1e-10);
+        assert!((s - 0.5).abs() < 1e-10, "sparsity={}", s);
+    }
+
+    #[test]
+    fn sparsity_threshold_matters() {
+        let plan = array![[1e-8, 0.5], [0.5, 1e-8]];
+        // Tight threshold: not zero
+        assert!(sparsity(&plan, 1e-10) < 1e-10);
+        // Loose threshold: counts as zero
+        assert!((sparsity(&plan, 1e-6) - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn omega_regularization_term() {
+        let reg = SquaredL2::new(2.0);
+        let plan = array![[1.0, 0.0], [0.0, 1.0]];
+        // Omega = (gamma/2) * ||P||^2 = (2/2) * (1+0+0+1) = 2
+        let val = reg.omega(&plan);
+        assert!((val - 2.0).abs() < 1e-10, "omega={}", val);
+    }
+
+    #[test]
     fn test_sparse_vs_dense() {
         let a = array![0.25, 0.25, 0.25, 0.25];
         let b = array![0.25, 0.25, 0.25, 0.25];

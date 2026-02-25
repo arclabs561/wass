@@ -5,8 +5,8 @@
 //!
 //! Metric: $GW(C_1, C_2) = \min_P \sum_{ijkl} |C_1(i,k) - C_2(j,l)|^2 P_{ij} P_{kl} - \epsilon H(P)$
 
-use ndarray::{Array1, Array2};
 use crate::{sinkhorn_log, Error, Result};
+use ndarray::{Array1, Array2};
 
 /// Compute the Entropic Gromov-Wasserstein discrepancy and transport plan.
 pub fn gromov_wasserstein(
@@ -66,4 +66,50 @@ pub fn gromov_wasserstein(
     }
 
     Ok((plan, gw_dist))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ndarray::array;
+
+    #[test]
+    fn gw_identical_spaces_low_cost() {
+        // Two identical metric spaces should have low GW cost
+        let c = array![[0.0, 1.0], [1.0, 0.0]];
+        let p = array![0.5, 0.5];
+        let (plan, dist) = gromov_wasserstein(&c, &c, &p, &p, 0.1, 10, 50).unwrap();
+        // GW with entropic regularization doesn't reach exactly 0;
+        // the plan should be close to identity-like (diagonal dominant)
+        assert!(dist < 1.0, "identical spaces should have low dist: dist={}", dist);
+        let sum: f64 = plan.iter().sum();
+        assert!((sum - 1.0).abs() < 0.05, "plan should sum to ~1: sum={}", sum);
+    }
+
+    #[test]
+    fn gw_plan_has_correct_shape() {
+        let c1 = array![[0.0, 1.0, 2.0], [1.0, 0.0, 1.0], [2.0, 1.0, 0.0]];
+        let c2 = array![[0.0, 3.0], [3.0, 0.0]];
+        let p = array![0.33, 0.34, 0.33];
+        let q = array![0.5, 0.5];
+        let (plan, _) = gromov_wasserstein(&c1, &c2, &p, &q, 0.1, 5, 50).unwrap();
+        assert_eq!(plan.shape(), &[3, 2]);
+    }
+
+    #[test]
+    fn gw_rejects_non_square_cost() {
+        let c1 = array![[0.0, 1.0, 2.0], [1.0, 0.0, 1.0]]; // 2x3, not square
+        let c2 = array![[0.0, 1.0], [1.0, 0.0]];
+        let p = array![0.5, 0.5];
+        let q = array![0.5, 0.5];
+        assert!(gromov_wasserstein(&c1, &c2, &p, &q, 0.1, 5, 50).is_err());
+    }
+
+    #[test]
+    fn gw_rejects_length_mismatch() {
+        let c = array![[0.0, 1.0], [1.0, 0.0]];
+        let p = array![0.5, 0.5];
+        let q_bad = array![0.33, 0.34, 0.33]; // wrong length for c
+        assert!(gromov_wasserstein(&c, &c, &p, &q_bad, 0.1, 5, 50).is_err());
+    }
 }
