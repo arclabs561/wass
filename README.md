@@ -46,6 +46,7 @@ let (plan, dist, iters) = sinkhorn_log_with_convergence(
 cargo run -p wass --example noisy_ocr_matching              # unbalanced OT for document alignment
 cargo run -p wass --example unbalanced_sinkhorn_mass_mismatch # divergence vs mass penalty
 cargo run -p wass --example sinkhorn_divergence_same_support  # balanced divergence
+cargo run -p wass --example sparse_vs_sinkhorn               # L2 sparse plans vs entropic dense plans
 ```
 
 ## Tests
@@ -54,7 +55,7 @@ cargo run -p wass --example sinkhorn_divergence_same_support  # balanced diverge
 cargo test -p wass
 ```
 
-30 tests covering Sinkhorn convergence, divergence properties (symmetry, non-negativity, convexity, cost-shift invariance), unbalanced OT behavior, and sparse transport.
+58 tests covering Sinkhorn convergence, transport plan marginal validity, divergence properties (symmetry, non-negativity, convexity, cost-shift invariance), unbalanced OT, Gromov-Wasserstein, sparse transport, semidiscrete OT, flow drift, and EMD.
 
 ## License
 
