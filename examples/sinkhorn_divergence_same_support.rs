@@ -23,4 +23,3 @@ fn main() {
     let div = wass::sinkhorn_divergence_same_support(&a, &b, &cost, reg, max_iter, tol).unwrap();
     println!("Sinkhorn divergence (same support) = {div}");
 }
-

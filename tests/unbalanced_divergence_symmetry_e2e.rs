@@ -35,4 +35,3 @@ fn unbalanced_sinkhorn_divergence_same_support_is_symmetric_even_with_mass_misma
         ba
     );
 }
-

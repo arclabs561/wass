@@ -52,8 +52,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 2. Embed Tokens (signed n-gram hashing)
     let dim = 2048;
-    let ref_vecs: Vec<Array1<f32>> = ref_tokens.iter().map(|t| embed_char_ngrams_signed(t, dim)).collect();
-    let ocr_vecs: Vec<Array1<f32>> = ocr_tokens.iter().map(|t| embed_char_ngrams_signed(t, dim)).collect();
+    let ref_vecs: Vec<Array1<f32>> = ref_tokens
+        .iter()
+        .map(|t| embed_char_ngrams_signed(t, dim))
+        .collect();
+    let ocr_vecs: Vec<Array1<f32>> = ocr_tokens
+        .iter()
+        .map(|t| embed_char_ngrams_signed(t, dim))
+        .collect();
 
     // 3. Build Weights (downweight boilerplate/stopwords/short tokens/numbers)
     fn weights_for(tokens: &[String]) -> Array1<f32> {
@@ -91,7 +97,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 5. Run UOT with different rhos
     // Low rho = ignores outliers (HEADER/FOOTER).
     // High rho = forces matching everything.
-    
+
     // Slightly larger epsilon makes typos cheaper to match than to delete.
     let reg = 0.1;
     let max_iter = 1000;
@@ -103,8 +109,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for &rho in &[0.5, 10.0] {
         let div = unbalanced_sinkhorn_divergence_general(
-            &ref_weights, &ocr_weights, &c_ab, &c_aa, &c_bb,
-            reg, rho, max_iter, tol
+            &ref_weights,
+            &ocr_weights,
+            &c_ab,
+            &c_aa,
+            &c_bb,
+            reg,
+            rho,
+            max_iter,
+            tol,
         )?;
 
         let interpretation = if rho < 1.0 {
@@ -117,7 +130,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Show the plan to prove it works
         let (plan, _, _) = unbalanced_sinkhorn_log_with_convergence(
-            &ref_weights, &ocr_weights, &c_ab, reg, rho, max_iter, tol
+            &ref_weights,
+            &ocr_weights,
+            &c_ab,
+            reg,
+            rho,
+            max_iter,
+            tol,
         )?;
 
         // Diagnostics we care about in practice:
@@ -187,14 +206,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         println!();
         println!("  most deleted source tokens:");
-        for (i, m) in top_k_by(&deleted_src.iter().map(|(i, m)| (*i, *m)).collect::<Vec<_>>(), 6) {
-            println!("    {:15} deleted={:.3}  w_src={:.3}", ref_tokens[i], m, ref_weights[i]);
+        for (i, m) in top_k_by(
+            &deleted_src
+                .iter()
+                .map(|(i, m)| (*i, *m))
+                .collect::<Vec<_>>(),
+            6,
+        ) {
+            println!(
+                "    {:15} deleted={:.3}  w_src={:.3}",
+                ref_tokens[i], m, ref_weights[i]
+            );
         }
 
         println!();
         println!("  most unused target tokens:");
-        for (j, m) in top_k_by(&unused_tgt.iter().map(|(j, m)| (*j, *m)).collect::<Vec<_>>(), 8) {
-            println!("    {:15} unused={:.3}  w_tgt={:.3}", ocr_tokens[j], m, ocr_weights[j]);
+        for (j, m) in top_k_by(
+            &unused_tgt.iter().map(|(j, m)| (*j, *m)).collect::<Vec<_>>(),
+            8,
+        ) {
+            println!(
+                "    {:15} unused={:.3}  w_tgt={:.3}",
+                ocr_tokens[j], m, ocr_weights[j]
+            );
         }
 
         println!();

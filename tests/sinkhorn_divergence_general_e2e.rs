@@ -43,14 +43,21 @@ fn sinkhorn_divergence_general_is_symmetric_and_zero_on_diagonal() {
     let max_iter = 2000;
     let tol = 1e-2;
 
-    let daa = wass::sinkhorn_divergence_general(&a, &a, &cost_aa, &cost_aa, &cost_aa, reg, max_iter, tol).unwrap();
-    let dbb = wass::sinkhorn_divergence_general(&b, &b, &cost_bb, &cost_bb, &cost_bb, reg, max_iter, tol).unwrap();
+    let daa =
+        wass::sinkhorn_divergence_general(&a, &a, &cost_aa, &cost_aa, &cost_aa, reg, max_iter, tol)
+            .unwrap();
+    let dbb =
+        wass::sinkhorn_divergence_general(&b, &b, &cost_bb, &cost_bb, &cost_bb, reg, max_iter, tol)
+            .unwrap();
     assert!(daa.abs() < 1e-5, "daa={}", daa);
     assert!(dbb.abs() < 1e-5, "dbb={}", dbb);
 
-    let dab = wass::sinkhorn_divergence_general(&a, &b, &cost_ab, &cost_aa, &cost_bb, reg, max_iter, tol).unwrap();
-    let dba = wass::sinkhorn_divergence_general(&b, &a, &cost_ba, &cost_bb, &cost_aa, reg, max_iter, tol).unwrap();
+    let dab =
+        wass::sinkhorn_divergence_general(&a, &b, &cost_ab, &cost_aa, &cost_bb, reg, max_iter, tol)
+            .unwrap();
+    let dba =
+        wass::sinkhorn_divergence_general(&b, &a, &cost_ba, &cost_bb, &cost_aa, reg, max_iter, tol)
+            .unwrap();
     assert!((dab - dba).abs() < 1e-4, "dab={} dba={}", dab, dba);
     assert!(dab >= -1e-6);
 }
-
