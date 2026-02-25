@@ -31,21 +31,21 @@ fn main() {
 
     for &rho in &[0.05, 0.5, 2.0, 10.0] {
         let (plan, obj_ab, iters) =
-            wass::unbalanced_sinkhorn_log_with_convergence(&a, &b, &cost, reg, rho, max_iter, tol).unwrap();
+            wass::unbalanced_sinkhorn_log_with_convergence(&a, &b, &cost, reg, rho, max_iter, tol)
+                .unwrap();
 
         let row_mass: f32 = plan.sum_axis(ndarray::Axis(1)).sum();
         let col_mass: f32 = plan.sum_axis(ndarray::Axis(0)).sum();
         let plan_mass: f32 = plan.sum();
 
-        let div =
-            wass::unbalanced_sinkhorn_divergence_same_support(&a, &b, &cost, reg, rho, max_iter, tol).unwrap();
+        let div = wass::unbalanced_sinkhorn_divergence_same_support(
+            &a, &b, &cost, reg, rho, max_iter, tol,
+        )
+        .unwrap();
 
-        println!(
-            "rho={rho:>6.2}  iters={iters:>4}  obj={obj_ab:.6}  div={div:.12}"
-        );
+        println!("rho={rho:>6.2}  iters={iters:>4}  obj={obj_ab:.6}  div={div:.12}");
         println!(
             "             plan_mass={plan_mass:.6}  row_mass={row_mass:.6}  col_mass={col_mass:.6}"
         );
     }
 }
-

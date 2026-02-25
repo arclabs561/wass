@@ -30,9 +30,10 @@ fn unbalanced_transport_matches_marginals_better_when_rho_increases() {
     let rho_small = 0.5;
     let rho_big = 10.0;
 
-    let (p_small, _obj_small, _iters_small) =
-        wass::unbalanced_sinkhorn_log_with_convergence(&a, &b, &cost, reg, rho_small, max_iter, tol)
-            .unwrap();
+    let (p_small, _obj_small, _iters_small) = wass::unbalanced_sinkhorn_log_with_convergence(
+        &a, &b, &cost, reg, rho_small, max_iter, tol,
+    )
+    .unwrap();
     let (p_big, _obj_big, _iters_big) =
         wass::unbalanced_sinkhorn_log_with_convergence(&a, &b, &cost, reg, rho_big, max_iter, tol)
             .unwrap();
@@ -75,4 +76,3 @@ fn unbalanced_transport_matches_marginals_better_when_rho_increases() {
         err_big
     );
 }
-

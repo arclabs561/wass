@@ -24,15 +24,24 @@ fn unbalanced_sinkhorn_handles_mass_mismatch() {
 
     // With small rho (cheap mass change), divergence should be small.
     let rho_small = 0.05;
-    let d_small =
-        wass::unbalanced_sinkhorn_divergence_same_support(&a, &b, &cost, reg, rho_small, max_iter, tol).unwrap();
+    let d_small = wass::unbalanced_sinkhorn_divergence_same_support(
+        &a, &b, &cost, reg, rho_small, max_iter, tol,
+    )
+    .unwrap();
 
     // With large rho (expensive mass change), divergence should be larger.
     let rho_large = 10.0;
-    let d_large =
-        wass::unbalanced_sinkhorn_divergence_same_support(&a, &b, &cost, reg, rho_large, max_iter, tol).unwrap();
+    let d_large = wass::unbalanced_sinkhorn_divergence_same_support(
+        &a, &b, &cost, reg, rho_large, max_iter, tol,
+    )
+    .unwrap();
 
-    assert!(d_small <= d_large + 1e-3, "d_small={} d_large={}", d_small, d_large);
+    assert!(
+        d_small <= d_large + 1e-3,
+        "d_small={} d_large={}",
+        d_small,
+        d_large
+    );
     assert!(d_small >= -1e-6);
     assert!(d_large >= -1e-6);
 }
@@ -43,7 +52,7 @@ fn unbalanced_sinkhorn_divergence_zero_on_diagonal() {
     let cost = line_cost(a.len());
     let reg = 0.1;
     let rho = 1.0;
-    let d = wass::unbalanced_sinkhorn_divergence_same_support(&a, &a, &cost, reg, rho, 4000, 1e-3).unwrap();
+    let d = wass::unbalanced_sinkhorn_divergence_same_support(&a, &a, &cost, reg, rho, 4000, 1e-3)
+        .unwrap();
     assert!(d.abs() < 1e-4, "d={}", d);
 }
-

@@ -26,6 +26,9 @@ fn unbalanced_divergence_is_zero_on_diagonal_with_sparse_zeros() {
         wass::unbalanced_sinkhorn_divergence_same_support(&a, &a, &cost, reg, rho, max_iter, tol)
             .unwrap();
 
-    assert!(d.abs() < 1e-4, "expected diagonal ~0 even with zeros, got {}", d);
+    assert!(
+        d.abs() < 1e-4,
+        "expected diagonal ~0 even with zeros, got {}",
+        d
+    );
 }
-

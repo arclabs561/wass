@@ -39,11 +39,19 @@ fn unbalanced_divergence_increases_with_rho_on_outlier() {
     let rho_small = 0.05;
     let rho_large = 20.0;
 
-    let d_small =
-        wass::unbalanced_sinkhorn_divergence_same_support(&a, &b, &cost, reg, rho_small, max_iter, tol).unwrap();
-    let d_large =
-        wass::unbalanced_sinkhorn_divergence_same_support(&a, &b, &cost, reg, rho_large, max_iter, tol).unwrap();
+    let d_small = wass::unbalanced_sinkhorn_divergence_same_support(
+        &a, &b, &cost, reg, rho_small, max_iter, tol,
+    )
+    .unwrap();
+    let d_large = wass::unbalanced_sinkhorn_divergence_same_support(
+        &a, &b, &cost, reg, rho_large, max_iter, tol,
+    )
+    .unwrap();
 
-    assert!(d_small <= d_large + 1e-4, "d_small={} d_large={}", d_small, d_large);
+    assert!(
+        d_small <= d_large + 1e-4,
+        "d_small={} d_large={}",
+        d_small,
+        d_large
+    );
 }
-

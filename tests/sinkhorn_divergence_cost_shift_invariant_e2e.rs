@@ -36,4 +36,3 @@ fn sinkhorn_divergence_is_invariant_to_constant_cost_shift_same_support() {
         d2
     );
 }
-

@@ -36,9 +36,15 @@ fn sinkhorn_divergence_is_convex_in_first_argument_same_support() {
     let tol = 1e-2;
 
     // Deterministic pseudo-random-ish weights (no rng dependency in tests).
-    let a1 = normalize(Array1::from_iter((0..n).map(|i| ((i * 37 + 11) % 101) as f32)));
-    let a2 = normalize(Array1::from_iter((0..n).map(|i| ((i * 19 + 7) % 97) as f32)));
-    let b = normalize(Array1::from_iter((0..n).map(|i| ((i * 13 + 5) % 89) as f32)));
+    let a1 = normalize(Array1::from_iter(
+        (0..n).map(|i| ((i * 37 + 11) % 101) as f32),
+    ));
+    let a2 = normalize(Array1::from_iter(
+        (0..n).map(|i| ((i * 19 + 7) % 97) as f32),
+    ));
+    let b = normalize(Array1::from_iter(
+        (0..n).map(|i| ((i * 13 + 5) % 89) as f32),
+    ));
 
     let lambda = 0.3f32;
     let a_mix = &a1 * lambda + &a2 * (1.0 - lambda);
@@ -59,4 +65,3 @@ fn sinkhorn_divergence_is_convex_in_first_argument_same_support() {
         s2
     );
 }
-

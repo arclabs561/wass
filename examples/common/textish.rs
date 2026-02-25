@@ -24,17 +24,54 @@ pub fn is_number(tok: &str) -> bool {
 pub fn is_stopword(tok: &str) -> bool {
     matches!(
         tok,
-        "the" | "in" | "of" | "to" | "and" | "a" | "an" | "on" | "for" | "with" | "by" | "at"
-            | "from" | "this" | "that" | "is" | "are" | "do" | "not" | "page" | "our" | "all"
+        "the"
+            | "in"
+            | "of"
+            | "to"
+            | "and"
+            | "a"
+            | "an"
+            | "on"
+            | "for"
+            | "with"
+            | "by"
+            | "at"
+            | "from"
+            | "this"
+            | "that"
+            | "is"
+            | "are"
+            | "do"
+            | "not"
+            | "page"
+            | "our"
+            | "all"
     )
 }
 
 pub fn is_boilerplate(tok: &str) -> bool {
     matches!(
         tok,
-        "subscribe" | "newsletter" | "cookies" | "cookie" | "privacy" | "policy" | "terms"
-            | "menu" | "home" | "contact" | "share" | "twitter" | "linkedin" | "copyright"
-            | "header" | "footer" | "confidential" | "distribute" | "internal" | "memo"
+        "subscribe"
+            | "newsletter"
+            | "cookies"
+            | "cookie"
+            | "privacy"
+            | "policy"
+            | "terms"
+            | "menu"
+            | "home"
+            | "contact"
+            | "share"
+            | "twitter"
+            | "linkedin"
+            | "copyright"
+            | "header"
+            | "footer"
+            | "confidential"
+            | "distribute"
+            | "internal"
+            | "memo"
     )
 }
 
@@ -180,4 +217,3 @@ pub fn weights_tfidf_2docs(
     }
     (w_a, w_b)
 }
-

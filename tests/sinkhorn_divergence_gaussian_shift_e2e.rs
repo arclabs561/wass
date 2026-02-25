@@ -43,6 +43,10 @@ fn sinkhorn_divergence_increases_with_mean_shift() {
 
     assert!(d1 >= -1e-6);
     assert!(d2 >= -1e-6);
-    assert!(d2 > d1, "expected bigger shift => bigger divergence: d1={} d2={}", d1, d2);
+    assert!(
+        d2 > d1,
+        "expected bigger shift => bigger divergence: d1={} d2={}",
+        d1,
+        d2
+    );
 }
-

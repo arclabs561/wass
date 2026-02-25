@@ -50,9 +50,17 @@ fn main() {
 
     for &rho in &[0.05, 0.2, 1.0, 5.0, 20.0] {
         let (plan, _obj, _iters) =
-            wass::unbalanced_sinkhorn_log_with_convergence(&a, &b, &cost, reg, rho, max_iter, tol).unwrap();
-        let div = wass::unbalanced_sinkhorn_divergence_same_support(&a, &b, &cost, reg, rho, max_iter, tol).unwrap();
-        println!("{rho:>5.2}  {div:>9.6}  {mass:>9.6}", rho=rho, div=div, mass=plan.sum());
+            wass::unbalanced_sinkhorn_log_with_convergence(&a, &b, &cost, reg, rho, max_iter, tol)
+                .unwrap();
+        let div = wass::unbalanced_sinkhorn_divergence_same_support(
+            &a, &b, &cost, reg, rho, max_iter, tol,
+        )
+        .unwrap();
+        println!(
+            "{rho:>5.2}  {div:>9.6}  {mass:>9.6}",
+            rho = rho,
+            div = div,
+            mass = plan.sum()
+        );
     }
 }
-
