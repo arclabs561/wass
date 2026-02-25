@@ -47,6 +47,7 @@ cargo run -p wass --example noisy_ocr_matching              # unbalanced OT for 
 cargo run -p wass --example unbalanced_sinkhorn_mass_mismatch # divergence vs mass penalty
 cargo run -p wass --example sinkhorn_divergence_same_support  # balanced divergence
 cargo run -p wass --example sparse_vs_sinkhorn               # L2 sparse plans vs entropic dense plans
+cargo run -p wass --example gromov_wasserstein_graph_match   # structure-preserving alignment of metric spaces
 ```
 
 ## Tests
