@@ -38,6 +38,12 @@
 //!
 //! - Blondel, Seguy, Rolet (2018). "Smooth and Sparse Optimal Transport"
 //!   <https://arxiv.org/abs/1710.06276>
+//! - Gonzalez-Sanz & Nutz (2024). "Sparsity of Quadratically Regularized OT"
+//!   -- proves L2-regularized OT yields exact zeros, unlike entropic OT which is always dense
+//! - Gonzalez-Sanz et al. (2025). "Sparse Regularized OT without Curse of Dimensionality"
+//!   -- quadratic regularization avoids the dimension curse in sample complexity
+//! - Liu et al. (2022). "Sparsity-Constrained OT" -- direct cardinality constraints on the
+//!   transport plan nonzeros as an alternative to regularization-induced sparsity
 
 use crate::{Error, Result};
 use ndarray::{Array1, Array2};

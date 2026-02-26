@@ -3,6 +3,10 @@
 //! Demonstrates using Unbalanced Optimal Transport to align a "clean" reference text
 //! with a "noisy" OCR scan that contains typos and irrelevant headers/footers.
 //!
+//! See also: `document_alignment_demo` -- a more involved variant that compares two
+//! noisy documents against each other using TF-IDF weighting and bag-of-words, with
+//! detailed diagnostics on credible vs suspect alignments.
+//!
 //! # The Problem
 //!
 //! You have a clean database entry: "Quarterly earnings showed steady growth."

@@ -4,6 +4,15 @@
 //! potentials + scores + (hard) assignments, plus a deterministic SGD fitter for `g`.
 //!
 //! `flowmatch` uses this for SD-FM experiments.
+//!
+//! # References
+//!
+//! - Agarwal et al. (2024, NeurIPS). “A Combinatorial Algorithm for Semidiscrete OT”
+//!   -- O(n log n) exact algorithm as an alternative to SGD on dual potentials
+//! - Taskesen et al. (2023). “Semi-discrete OT: Hardness, Regularization and Numerical
+//!   Solution” -- validates the regularized SGD approach used here
+//! - Pooladian et al. (2023, ICML). “Minimax Estimation of Discontinuous OT Maps:
+//!   Semidiscrete Case” -- minimax-optimal estimators; SD-OT maps are piecewise constant
 
 use crate::{Error, Result, EPSILON};
 use ndarray::{Array1, ArrayView1, ArrayView2};

@@ -5,6 +5,11 @@
 //!
 //! This module intentionally stays small and composable; higher-level training
 //! objectives belong in L2 (`fynch`) and domain wiring belongs in L5+.
+//!
+//! # References
+//!
+//! - Pooladian et al. (2024). "Neural OT with Lagrangian Costs" -- connects
+//!   flow/drift to Lagrangian OT where transport follows a least-action principle
 
 use ndarray::{Array1, ArrayView1};
 
