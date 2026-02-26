@@ -1,6 +1,6 @@
 [package]
 name = "wass"
-version = "0.1.0"
+version = "0.1.2"
 authors = ["Arc <attobop@gmail.com>"]
 edition = "2021"
 description = "Optimal transport: Wasserstein distance, Sinkhorn algorithm, and Sinkhorn divergence"
