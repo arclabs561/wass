@@ -10,6 +10,7 @@
 | Get sparse (hard-assignment) plans        | `sparse_vs_sinkhorn`                                             |
 | Handle outliers or mass mismatch          | `unbalanced_outlier_tradeoff`, `unbalanced_sinkhorn_mass_mismatch` |
 | Transfer a color palette via OT           | `color_transfer`                                                 |
+| Register (align) two 2D point clouds     | `point_cloud_registration`                                       |
 
 ## Example descriptions
 
@@ -28,6 +29,8 @@
 - **`unbalanced_sinkhorn_mass_mismatch`** -- Shows unbalanced OT behavior when source and target have different total mass. Varying rho controls the penalty for mass creation/destruction.
 
 - **`color_transfer`** -- Computes an OT plan between two small color palettes (warm and cool RGB triplets) using Sinkhorn, then applies the plan to map one palette onto the other. A minimal version of the classic color-transfer application.
+
+- **`point_cloud_registration`** -- Registers two 2D point clouds (source circle vs. rotated/translated/noisy copy) via Sinkhorn OT. Applies barycentric mapping from the transport plan and reports mean/max nearest-neighbor registration error.
 
 ## Running
 
