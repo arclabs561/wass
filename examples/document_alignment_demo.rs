@@ -10,6 +10,10 @@
 //! - **token normalization**
 //! - **cheap char n-gram embeddings** (hashing trick)
 //! - **unbalanced OT** to delete junk mass instead of forcing a match.
+//!
+//! See also: `noisy_ocr_matching` -- a simpler variant focused on aligning a single
+//! clean reference against a noisy OCR scan, with emphasis on the rho parameter's
+//! effect on outlier rejection.
 
 mod common;
 

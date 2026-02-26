@@ -72,6 +72,11 @@
 //! - Kantorovich (1942). "On the Translocation of Masses"
 //! - Cuturi (2013). "Sinkhorn Distances: Lightspeed Computation of Optimal Transport"
 //! - Peyré & Cuturi (2019). "Computational Optimal Transport"
+//! - Memoli (2011). "Gromov-Wasserstein Distances and Metric Measure Spaces"
+//! - Blondel, Seguy, Rolet (2018). "Smooth and Sparse OT" (AISTATS)
+//! - Chizat et al. (2018). "Scaling Algorithms for Unbalanced OT Problems"
+//! - Sejourne et al. (2023). "Unbalanced OT Meets Sliced-Wasserstein"
+//! - Rabin et al. (2012). "Wasserstein Barycenter and Its Application to Texture Mixing"
 
 use ndarray::{Array1, Array2};
 use thiserror::Error;

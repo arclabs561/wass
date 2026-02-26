@@ -1,3 +1,22 @@
+// Sinkhorn divergence vs raw Sinkhorn (OT) distance:
+//
+// The raw Sinkhorn cost OT_eps(a, b) includes an entropic bias: even when a == b,
+// OT_eps(a, a) > 0 because the entropy regularization spreads mass.  This means
+// the raw cost is not a proper divergence (it does not equal zero for identical
+// distributions).
+//
+// Sinkhorn divergence removes this bias:
+//   SD_eps(a, b) = OT_eps(a, b) - 0.5 * OT_eps(a, a) - 0.5 * OT_eps(b, b)
+//
+// Properties:
+// - SD_eps(a, a) = 0 for any distribution a  (debiased)
+// - SD_eps(a, b) >= 0                         (non-negative)
+// - SD_eps metrizes weak convergence as eps -> 0
+// - Differentiable in both arguments (useful for optimization / loss functions)
+//
+// Use Sinkhorn divergence when you need a loss or metric between distributions.
+// Use the raw Sinkhorn cost when you only need the transport plan.
+
 use ndarray::{array, Array2};
 
 fn line_cost(n: usize) -> Array2<f32> {

@@ -8,7 +8,20 @@
 //! 2. GW recovers the correct alignment (transport plan concentrates on the permutation)
 //! 3. Non-isomorphic graphs produce diffuse plans (no perfect matching)
 //!
-//! Reference: Memoli (2011), "Gromov-Wasserstein Distances and Metric Measure Spaces"
+//! The 4x4 graph size here is chosen for readability of the printed transport plan.
+//! GW scales to larger graphs; the main bottleneck is the O(n^2 * m^2) cost tensor,
+//! which the entropic formulation makes tractable for moderate sizes (hundreds of nodes).
+//!
+//! Real-world GW use cases include:
+//! - Cross-lingual word embedding alignment (no parallel corpus needed)
+//! - Protein structure comparison (matching residue contact maps)
+//! - Shape matching in computer vision (comparing geodesic distance matrices)
+//! - Knowledge graph alignment across different schemas
+//!
+//! References:
+//! - Memoli (2011). "Gromov-Wasserstein Distances and Metric Measure Spaces"
+//! - Peyre, Cuturi, Solomon (2016). "Gromov-Wasserstein Averaging"
+//! - Rioux et al. (2023). "Entropic GW Distances: Stability and Algorithms"
 //!
 //! Run: cargo run -p wass --example gromov_wasserstein_graph_match
 

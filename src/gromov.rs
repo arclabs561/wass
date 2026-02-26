@@ -24,6 +24,12 @@
 //! - Memoli (2011). "Gromov-Wasserstein Distances and Metric Measure Spaces"
 //! - Peyre, Cuturi, Solomon (2016). "Gromov-Wasserstein Averaging"
 //! - Peyre & Cuturi (2019). "Computational Optimal Transport", Ch. 10
+//! - Rioux, Goldfeld, Kato (2023). "Entropic Gromov-Wasserstein Distances:
+//!   Stability and Algorithms" -- convergence rates for the Frank-Wolfe/Sinkhorn scheme
+//! - Zhang et al. (2024). "Fast Gradient Computation for Gromov-Wasserstein Distance"
+//!   -- accelerated gradient for the C1*P*C2^T inner loop (potential future optimization)
+//! - Beier et al. (2021). "On a Linear Gromov-Wasserstein Distance" -- O(n^2)
+//!   linear approximation as a cheaper alternative for large problems
 
 use crate::{sinkhorn_log, Error, Result};
 use ndarray::{Array1, Array2};
