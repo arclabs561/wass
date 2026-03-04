@@ -74,7 +74,10 @@ fn main() {
         let argmax = (0..n)
             .max_by(|&a, &b| plan[[i, a]].partial_cmp(&plan[[i, b]]).unwrap())
             .unwrap();
-        print!("  <- A{i} matches B{argmax} (should be B{})", perm.iter().position(|&x| x == i).unwrap());
+        print!(
+            "  <- A{i} matches B{argmax} (should be B{})",
+            perm.iter().position(|&x| x == i).unwrap()
+        );
         println!();
     }
 

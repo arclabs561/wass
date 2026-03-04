@@ -249,7 +249,11 @@ mod tests {
         let g = fit_potentials_sgd_neg_dot(&y.view(), &b.view(), &cfg).unwrap();
         assert_eq!(g.len(), 2);
         // Potentials are centered (mean ~0)
-        assert!(g.mean().unwrap().abs() < 1e-3, "g should be centered: {:?}", g);
+        assert!(
+            g.mean().unwrap().abs() < 1e-3,
+            "g should be centered: {:?}",
+            g
+        );
     }
 
     #[test]

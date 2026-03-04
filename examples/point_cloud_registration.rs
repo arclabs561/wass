@@ -72,7 +72,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // -- Generate point clouds --
     let source = circle_points(n, radius);
-    let target = transform(&source, /*angle=*/ 0.4, /*dx=*/ 2.0, /*dy=*/ -1.5, /*noise=*/ 0.3, &mut rng);
+    let target = transform(
+        &source, /*angle=*/ 0.4, /*dx=*/ 2.0, /*dy=*/ -1.5, /*noise=*/ 0.3,
+        &mut rng,
+    );
 
     // -- Cost matrix: pairwise squared Euclidean distance --
     let mut cost = Array2::zeros((n, n));
@@ -90,8 +93,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let reg = 2.0;
     let max_iter = 1000;
     let tol = 1e-6;
-    let (plan, distance, iters) =
-        sinkhorn_log_with_convergence(&a, &b, &cost, reg, max_iter, tol)?;
+    let (plan, distance, iters) = sinkhorn_log_with_convergence(&a, &b, &cost, reg, max_iter, tol)?;
 
     println!("Points per cloud   : {n}");
     println!("Transport cost     : {distance:.4}");

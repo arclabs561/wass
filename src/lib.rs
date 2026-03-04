@@ -1645,8 +1645,16 @@ mod tests {
         let cost = array![[0.0, 1.0], [1.0, 0.0]];
         let emd = earth_mover_distance(&a, &b, &cost);
         // Moving 0.4 mass a distance of 1 => cost ~0.4
-        assert!(emd > 0.2, "shifted distributions should have positive cost: emd={}", emd);
-        assert!(emd < 0.6, "cost bounded by total mass * max cost: emd={}", emd);
+        assert!(
+            emd > 0.2,
+            "shifted distributions should have positive cost: emd={}",
+            emd
+        );
+        assert!(
+            emd < 0.6,
+            "cost bounded by total mass * max cost: emd={}",
+            emd
+        );
     }
 
     #[test]
@@ -1656,7 +1664,11 @@ mod tests {
         let cost = array![[0.0, 3.0], [3.0, 0.0]];
         let emd = earth_mover_distance(&a, &b, &cost);
         // Now stable with sinkhorn_log: all mass moves distance 3
-        assert!((emd - 3.0).abs() < 0.2, "point mass shift of 3: emd={}", emd);
+        assert!(
+            (emd - 3.0).abs() < 0.2,
+            "point mass shift of 3: emd={}",
+            emd
+        );
     }
 
     #[test]
@@ -1668,12 +1680,24 @@ mod tests {
         // Row sums should match source distribution
         for i in 0..3 {
             let row_sum: f32 = plan.row(i).sum();
-            assert!((row_sum - a[i]).abs() < 0.02, "row {} sum={}, expected={}", i, row_sum, a[i]);
+            assert!(
+                (row_sum - a[i]).abs() < 0.02,
+                "row {} sum={}, expected={}",
+                i,
+                row_sum,
+                a[i]
+            );
         }
         // Col sums should match target distribution
         for j in 0..3 {
             let col_sum: f32 = plan.column(j).sum();
-            assert!((col_sum - b[j]).abs() < 0.02, "col {} sum={}, expected={}", j, col_sum, b[j]);
+            assert!(
+                (col_sum - b[j]).abs() < 0.02,
+                "col {} sum={}, expected={}",
+                j,
+                col_sum,
+                b[j]
+            );
         }
     }
 
@@ -1683,7 +1707,10 @@ mod tests {
         let b = array![0.3, 0.7];
         let cost = array![[0.0, 2.0], [2.0, 0.0]];
         let (plan, _, _) = sinkhorn_log_with_convergence(&a, &b, &cost, 0.05, 500, 1e-6).unwrap();
-        assert!(plan.iter().all(|&p| p >= -1e-7), "plan has negative entries");
+        assert!(
+            plan.iter().all(|&p| p >= -1e-7),
+            "plan has negative entries"
+        );
     }
 
     #[test]
@@ -1695,7 +1722,10 @@ mod tests {
         let ab = wasserstein_1d(&a, &b);
         let bc = wasserstein_1d(&b, &c);
         let ac = wasserstein_1d(&a, &c);
-        assert!(ac <= ab + bc + 1e-6, "triangle inequality: {ac} > {ab} + {bc}");
+        assert!(
+            ac <= ab + bc + 1e-6,
+            "triangle inequality: {ac} > {ab} + {bc}"
+        );
     }
 
     #[test]

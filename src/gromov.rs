@@ -122,9 +122,17 @@ mod tests {
         let (plan, dist) = gromov_wasserstein(&c, &c, &p, &p, 0.1, 10, 50).unwrap();
         // GW with entropic regularization doesn't reach exactly 0;
         // the plan should be close to identity-like (diagonal dominant)
-        assert!(dist < 1.0, "identical spaces should have low dist: dist={}", dist);
+        assert!(
+            dist < 1.0,
+            "identical spaces should have low dist: dist={}",
+            dist
+        );
         let sum: f64 = plan.iter().sum();
-        assert!((sum - 1.0).abs() < 0.05, "plan should sum to ~1: sum={}", sum);
+        assert!(
+            (sum - 1.0).abs() < 0.05,
+            "plan should sum to ~1: sum={}",
+            sum
+        );
     }
 
     #[test]

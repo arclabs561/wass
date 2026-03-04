@@ -6,8 +6,8 @@
 //! Run: cargo run --example sparse_vs_sinkhorn
 
 use ndarray::{array, Array2};
-use wass::sparse::{solve_semidual_l2, sparsity};
 use wass::sinkhorn_log_with_convergence;
+use wass::sparse::{solve_semidual_l2, sparsity};
 
 fn main() {
     // 4 sources -> 4 targets, grid cost
@@ -38,24 +38,53 @@ fn main() {
 
     println!("Sinkhorn (epsilon={}):", reg);
     println!("  plan:\n{:8.4}", plan_sink);
-    println!("  distance: {:.4}, iters: {}, sparsity: {:.1}%\n", dist_sink, iters_sink, sp_sink * 100.0);
+    println!(
+        "  distance: {:.4}, iters: {}, sparsity: {:.1}%\n",
+        dist_sink,
+        iters_sink,
+        sp_sink * 100.0
+    );
 
     // Sparse OT (L2 regularization) -- produces zeros
     let gamma = 1.0;
-    let (plan_sparse, dist_sparse, iters_sparse) =
-        solve_semidual_l2(&a.mapv(|x| x as f64), &b.mapv(|x| x as f64), &cost_f64, gamma, 1000, 1e-6).unwrap();
+    let (plan_sparse, dist_sparse, iters_sparse) = solve_semidual_l2(
+        &a.mapv(|x| x as f64),
+        &b.mapv(|x| x as f64),
+        &cost_f64,
+        gamma,
+        1000,
+        1e-6,
+    )
+    .unwrap();
     let sp_sparse = sparsity(&plan_sparse, 1e-6);
 
     println!("Sparse OT (gamma={}):", gamma);
     println!("  plan:\n{:8.4}", plan_sparse);
-    println!("  distance: {:.4}, iters: {}, sparsity: {:.1}%\n", dist_sparse, iters_sparse, sp_sparse * 100.0);
+    println!(
+        "  distance: {:.4}, iters: {}, sparsity: {:.1}%\n",
+        dist_sparse,
+        iters_sparse,
+        sp_sparse * 100.0
+    );
 
     // Try increasing gamma for more sparsity
     for &g in &[0.5, 2.0, 5.0] {
-        let (plan, dist, _) =
-            solve_semidual_l2(&a.mapv(|x| x as f64), &b.mapv(|x| x as f64), &cost_f64, g, 1000, 1e-6).unwrap();
+        let (plan, dist, _) = solve_semidual_l2(
+            &a.mapv(|x| x as f64),
+            &b.mapv(|x| x as f64),
+            &cost_f64,
+            g,
+            1000,
+            1e-6,
+        )
+        .unwrap();
         let sp = sparsity(&plan, 1e-6);
-        println!("gamma={:.1}: distance={:.4}, sparsity={:.1}%", g, dist, sp * 100.0);
+        println!(
+            "gamma={:.1}: distance={:.4}, sparsity={:.1}%",
+            g,
+            dist,
+            sp * 100.0
+        );
     }
 
     println!();

@@ -24,10 +24,7 @@ fn rgb_distance(a: &[f32; 3], b: &[f32; 3]) -> f32 {
 fn print_palette(name: &str, palette: &[[f32; 3]]) {
     println!("{name}:");
     for (i, c) in palette.iter().enumerate() {
-        println!(
-            "  [{i}] R={:5.1}  G={:5.1}  B={:5.1}",
-            c[0], c[1], c[2]
-        );
+        println!("  [{i}] R={:5.1}  G={:5.1}  B={:5.1}", c[0], c[1], c[2]);
     }
 }
 
@@ -82,8 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let max_iter = 500;
     let tol = 1e-6;
 
-    let (plan, distance, iters) =
-        sinkhorn_log_with_convergence(&a, &b, &cost, reg, max_iter, tol)?;
+    let (plan, distance, iters) = sinkhorn_log_with_convergence(&a, &b, &cost, reg, max_iter, tol)?;
 
     println!("Sinkhorn distance: {distance:.2}  (converged in {iters} iterations, reg={reg})");
     println!();
@@ -96,7 +92,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!();
     for i in 0..n {
-        print!("warm{i}  ", );
+        print!("warm{i}  ",);
         for j in 0..n {
             // Scale by n so that a dominant entry reads close to 1.0.
             print!("  {:.3}", plan[[i, j]] * n as f32);
