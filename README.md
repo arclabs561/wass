@@ -1,5 +1,9 @@
 # wass
 
+[![crates.io](https://img.shields.io/crates/v/wass.svg)](https://crates.io/crates/wass)
+[![Documentation](https://docs.rs/wass/badge.svg)](https://docs.rs/wass)
+[![CI](https://github.com/arclabs561/wass/actions/workflows/ci.yml/badge.svg)](https://github.com/arclabs561/wass/actions/workflows/ci.yml)
+
 Optimal transport in Rust. Sinkhorn algorithm, unbalanced transport, sparse transport, Gromov-Wasserstein, semidiscrete OT.
 
 ## Problem
