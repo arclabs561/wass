@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! # wass
 //!
 //! Optimal transport: move mass from one distribution to another at minimum cost.
