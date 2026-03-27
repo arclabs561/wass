@@ -22,6 +22,8 @@ innr = { version = "0.1.8", optional = true }
 [dev-dependencies]
 proptest = "1.5"
 clump = "0.4"
+symproj = "0.1"
+slabs = "0.1"
 
 [features]
 default = []
