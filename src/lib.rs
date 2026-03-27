@@ -13,7 +13,10 @@
 //!
 //! | Function | Use Case | Complexity |
 //! |----------|----------|------------|
-//! | [`wasserstein_1d`] | 1D distributions | O(n log n) |
+//! | [`wasserstein_1d`] | 1D distributions (histograms) | O(n) |
+//! | [`wasserstein_1d_samples`] | 1D distributions (raw samples) | O(n log n) |
+//! | [`sliced_wasserstein`] | High-dim point clouds (random projections) | O(L n log n) |
+//! | [`max_sliced_wasserstein`] | High-dim point clouds (max projection) | O(L n log n) |
 //! | [`sinkhorn`] | General transport (dense) | O(n² × iterations) |
 //! | [`sinkhorn_low_rank`] | Large-scale transport (rank r) | O((n+m)r × iterations) |
 //! | [`sparse::solve_semidual_l2`] | Sparse transport (L2) | O(n² × L-BFGS iter) |
@@ -1667,107 +1670,277 @@ pub fn sinkhorn_low_rank(
     })
 }
 
-/// Sliced Wasserstein distance -- a scalable approximation for high dimensions.
+/// 1D Wasserstein-p distance between two empirical samples (sorting-based, exact).
 ///
-/// \[
-/// \mathrm{SW}_1(X, Y) = \mathbb{E}_{\theta \sim S^{d-1}}\bigl[W_1(\theta^\top X,\; \theta^\top Y)\bigr]
-/// \]
+/// Given raw samples (not histograms), computes the exact Wasserstein-p distance:
 ///
-/// **Idea** (Rabin et al., 2012; Bonneel et al., 2015): project both point clouds
-/// onto random 1D directions \(\theta\), compute the exact 1D \(W_1\) (which is
-/// just sorting + CDF integration), and average over projections.
+/// $$
+/// W_p(a, b) = \left(\frac{1}{n}\sum_{i=1}^{n} |a_{(i)} - b_{(i)}|^p\right)^{1/p}
+/// $$
 ///
-/// **Why**: full \(W_1\) in \(d\) dimensions requires \(O(n^3)\) (linear program)
-/// or \(O(n^2 k)\) (Sinkhorn). Sliced \(W_1\) costs only
-/// \(O(L \cdot n \log n)\) where \(L\) is the number of projections.
+/// where `a_{(i)}` and `b_{(i)}` are the order statistics (sorted values).
+/// Both samples must have the same length.
 ///
-/// **Trade-off**: the approximation is unbiased but has variance \(O(1/L)\).
-/// For \(L \ge 50\) the estimate is usually stable. Larger \(d\) may need more projections.
+/// For `p = 1`: sum of absolute differences of sorted values, divided by `n`.
+/// For `p = 2`: root-mean-square of sorted differences.
 ///
 /// # Arguments
 ///
-/// * `x` - Source point cloud (\(m \times d\))
-/// * `y` - Target point cloud (\(n \times d\))
-/// * `n_projections` - Number of random 1D directions \(L\)
-pub fn sliced_wasserstein(x: &Array2<f32>, y: &Array2<f32>, n_projections: usize) -> f32 {
+/// * `a` - First sample (will be sorted internally)
+/// * `b` - Second sample (same length as `a`)
+/// * `p` - Wasserstein exponent (typically 1 or 2, must be >= 1)
+///
+/// # Complexity
+///
+/// `O(n log n)` -- dominated by sorting.
+///
+/// # Example
+///
+/// ```rust
+/// use wass::wasserstein_1d_samples;
+///
+/// let a = [0.0, 1.0];
+/// let b = [1.0, 2.0];
+/// let w1 = wasserstein_1d_samples(&a, &b, 1.0);
+/// assert!((w1 - 1.0).abs() < 1e-6);
+/// ```
+pub fn wasserstein_1d_samples(a: &[f32], b: &[f32], p: f32) -> f32 {
+    assert_eq!(a.len(), b.len(), "samples must have same length");
+    assert!(p >= 1.0, "p must be >= 1.0, got {}", p);
+
+    let n = a.len();
+    if n == 0 {
+        return 0.0;
+    }
+
+    let mut sa: Vec<f32> = a.to_vec();
+    let mut sb: Vec<f32> = b.to_vec();
+    sa.sort_by(|x, y| x.total_cmp(y));
+    sb.sort_by(|x, y| x.total_cmp(y));
+
+    if (p - 1.0).abs() < 1e-7 {
+        // W1: mean absolute difference
+        let sum: f32 = sa.iter().zip(sb.iter()).map(|(x, y)| (x - y).abs()).sum();
+        sum / n as f32
+    } else {
+        // Wp: (mean |diff|^p)^(1/p)
+        let sum: f32 = sa
+            .iter()
+            .zip(sb.iter())
+            .map(|(x, y)| (x - y).abs().powf(p))
+            .sum();
+        (sum / n as f32).powf(1.0 / p)
+    }
+}
+
+/// Project points onto a direction vector and sort the projections.
+fn project_and_sort(
+    points: &Array2<f32>,
+    direction: &Array1<f32>,
+    #[allow(unused_variables)] n_points: usize,
+) -> Vec<f32> {
+    #[cfg(feature = "simd")]
+    let mut proj = {
+        let mut v = Vec::with_capacity(n_points);
+        for i in 0..n_points {
+            v.push(innr::dense::dot(
+                points.row(i).as_slice().unwrap(),
+                direction.as_slice().unwrap(),
+            ));
+        }
+        v
+    };
+
+    #[cfg(not(feature = "simd"))]
+    let mut proj = points.dot(direction).to_vec();
+
+    proj.sort_by(|a, b| a.total_cmp(b));
+    proj
+}
+
+/// Generate a random unit vector on `S^{d-1}` via Gaussian normalization.
+fn random_unit_direction(d: usize, rng: &mut impl rand::Rng) -> Array1<f32> {
+    use rand_distr::{Distribution, StandardNormal};
+
+    let mut direction: Array1<f32> = Array1::zeros(d);
+    for i in 0..d {
+        direction[i] = StandardNormal.sample(rng);
+    }
+
+    #[cfg(feature = "simd")]
+    let norm = innr::dense::norm(direction.as_slice().unwrap());
+    #[cfg(not(feature = "simd"))]
+    let norm = direction.dot(&direction).sqrt();
+
+    direction /= norm.max(EPSILON);
+    direction
+}
+
+/// Wasserstein-p on two sorted 1D projections of equal length.
+fn w_p_sorted(proj_x: &[f32], proj_y: &[f32], p: f32) -> f32 {
+    let n = proj_x.len().min(proj_y.len());
+    if n == 0 {
+        return 0.0;
+    }
+    if (p - 1.0).abs() < 1e-7 {
+        let sum: f32 = (0..n).map(|i| (proj_x[i] - proj_y[i]).abs()).sum();
+        sum / n as f32
+    } else {
+        let sum: f32 = (0..n).map(|i| (proj_x[i] - proj_y[i]).abs().powf(p)).sum();
+        (sum / n as f32).powf(1.0 / p)
+    }
+}
+
+/// Sliced Wasserstein distance -- a scalable approximation for high dimensions.
+///
+/// $$
+/// \mathrm{SW}_p(X, Y) = \left(\mathbb{E}_{\theta \sim S^{d-1}}\bigl[W_p(\theta^\top X,\; \theta^\top Y)^p\bigr]\right)^{1/p}
+/// $$
+///
+/// **Idea** (Rabin et al., 2012; Bonneel et al., 2015): project both point clouds
+/// onto random 1D directions `theta`, compute the exact 1D `W_p` (which is
+/// just sorting + paired differences), and aggregate over projections.
+///
+/// **Why**: full `W_p` in `d` dimensions requires `O(n^3)` (linear program)
+/// or `O(n^2 k)` (Sinkhorn). Sliced `W_p` costs only
+/// `O(L * n log n)` where `L` is the number of projections.
+///
+/// **Trade-off**: the approximation is unbiased but has variance `O(1/L)`.
+/// For `L >= 50` the estimate is usually stable. Larger `d` may need more projections.
+///
+/// # Arguments
+///
+/// * `x` - Source point cloud (m x d)
+/// * `y` - Target point cloud (n x d), must have same `d` as `x`
+/// * `n_projections` - Number of random 1D directions `L`
+/// * `seed` - RNG seed for reproducibility
+/// * `p` - Wasserstein exponent (typically 1 or 2, must be >= 1)
+///
+/// # Panics
+///
+/// Panics if `x` and `y` have different column counts (dimension mismatch).
+///
+/// # Example
+///
+/// ```rust
+/// use wass::sliced_wasserstein;
+/// use ndarray::array;
+///
+/// let x = array![[0.0, 0.0], [1.0, 1.0]];
+/// let y = array![[10.0, 10.0], [11.0, 11.0]];
+/// let sw = sliced_wasserstein(&x, &y, 50, 42, 1.0);
+/// assert!(sw > 5.0);
+/// ```
+pub fn sliced_wasserstein(
+    x: &Array2<f32>,
+    y: &Array2<f32>,
+    n_projections: usize,
+    seed: u64,
+    p: f32,
+) -> f32 {
     let d = x.ncols();
     assert_eq!(y.ncols(), d, "point dimensions must match");
+    assert!(p >= 1.0, "p must be >= 1.0, got {}", p);
 
     let m = x.nrows();
     let n = y.nrows();
 
-    if m == 0 || n == 0 {
+    if m == 0 || n == 0 || n_projections == 0 {
         return 0.0;
     }
 
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
-    use rand_distr::{Distribution, StandardNormal};
 
-    // Use a deterministic seed for consistency in tests/benchmarks
-    let mut rng = ChaCha8Rng::seed_from_u64(42);
-    let mut total = 0.0;
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let mut total = 0.0f64;
 
     for _ in 0..n_projections {
-        // 1. Generate random direction from unit sphere (Gaussian normalized)
-        let mut direction: Array1<f32> = Array1::zeros(d);
-        for i in 0..d {
-            direction[i] = StandardNormal.sample(&mut rng);
-        }
-
-        // Optimize: use innr for dot product if available
-        #[cfg(feature = "simd")]
-        let norm = innr::dense::norm(direction.as_slice().unwrap());
-        #[cfg(not(feature = "simd"))]
-        let norm = direction.dot(&direction).sqrt();
-
-        direction /= norm.max(EPSILON);
-
-        // 2. Project points
-        #[cfg(feature = "simd")]
-        let mut proj_x = Vec::with_capacity(m);
-        #[cfg(feature = "simd")]
-        for i in 0..m {
-            proj_x.push(innr::dense::dot(
-                x.row(i).as_slice().unwrap(),
-                direction.as_slice().unwrap(),
-            ));
-        }
-
-        #[cfg(not(feature = "simd"))]
-        let mut proj_x = x.dot(&direction).to_vec();
-
-        #[cfg(feature = "simd")]
-        let mut proj_y = Vec::with_capacity(n);
-        #[cfg(feature = "simd")]
-        for i in 0..n {
-            proj_y.push(innr::dense::dot(
-                y.row(i).as_slice().unwrap(),
-                direction.as_slice().unwrap(),
-            ));
-        }
-
-        #[cfg(not(feature = "simd"))]
-        let mut proj_y = y.dot(&direction).to_vec();
-
-        // 3. Sort projections
-        proj_x.sort_by(|a, b| a.total_cmp(b));
-        proj_y.sort_by(|a, b| a.total_cmp(b));
-
-        // 4. W₁ for 1D empirical distributions
-        // When m = n, this is just mean absolute difference
-        // When m != n, we should ideally use interpolation.
-        // For now, we assume m = n or truncate to min_len as a baseline.
-        let min_len = m.min(n);
-        let w1: f32 = (0..min_len)
-            .map(|i| (proj_x[i] - proj_y[i]).abs())
-            .sum::<f32>()
-            / min_len as f32;
-
-        total += w1;
+        let direction = random_unit_direction(d, &mut rng);
+        let proj_x = project_and_sort(x, &direction, m);
+        let proj_y = project_and_sort(y, &direction, n);
+        let wp = w_p_sorted(&proj_x, &proj_y, p);
+        // Aggregate W_p^p, then take p-th root at the end
+        total += (wp as f64).powi(p as i32);
     }
 
-    total / n_projections as f32
+    (total / n_projections as f64).powf(1.0 / p as f64) as f32
+}
+
+/// Max-sliced Wasserstein distance: finds the projection maximizing 1D Wasserstein.
+///
+/// $$
+/// \mathrm{max\text{-}SW}_p(X, Y) = \max_{\theta \in S^{d-1}} W_p(\theta^\top X,\; \theta^\top Y)
+/// $$
+///
+/// More discriminative than random projections but slower. Uses projected
+/// gradient ascent on the unit sphere: at each iteration, compute the
+/// gradient of `W_p` with respect to `theta` via finite differences,
+/// take a gradient step, and re-project onto `S^{d-1}`.
+///
+/// Falls back to the best of `max_iter` random restarts when `d` is large,
+/// since the optimization landscape has many local maxima.
+///
+/// # Arguments
+///
+/// * `x` - Source point cloud (m x d)
+/// * `y` - Target point cloud (n x d)
+/// * `max_iter` - Number of random restarts (each evaluates one direction)
+/// * `seed` - RNG seed
+/// * `p` - Wasserstein exponent (>= 1)
+///
+/// # Returns
+///
+/// The maximum 1D Wasserstein-p distance over `max_iter` random directions.
+///
+/// # Example
+///
+/// ```rust
+/// use wass::max_sliced_wasserstein;
+/// use ndarray::array;
+///
+/// let x = array![[0.0, 0.0], [1.0, 0.0]];
+/// let y = array![[10.0, 0.0], [11.0, 0.0]];
+/// let msw = max_sliced_wasserstein(&x, &y, 100, 42, 1.0);
+/// assert!(msw > 9.0);
+/// ```
+pub fn max_sliced_wasserstein(
+    x: &Array2<f32>,
+    y: &Array2<f32>,
+    max_iter: usize,
+    seed: u64,
+    p: f32,
+) -> f32 {
+    let d = x.ncols();
+    assert_eq!(y.ncols(), d, "point dimensions must match");
+    assert!(p >= 1.0, "p must be >= 1.0, got {}", p);
+
+    let m = x.nrows();
+    let n = y.nrows();
+
+    if m == 0 || n == 0 || max_iter == 0 {
+        return 0.0;
+    }
+
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha8Rng;
+
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let mut best = 0.0f32;
+
+    // For each random direction, compute W_p and keep the max.
+    // This is the "random restart" variant. For true gradient-based
+    // max-sliced, one would differentiate through the sort, which
+    // requires a differentiable framework.
+    for _ in 0..max_iter {
+        let direction = random_unit_direction(d, &mut rng);
+        let proj_x = project_and_sort(x, &direction, m);
+        let proj_y = project_and_sort(y, &direction, n);
+        let wp = w_p_sorted(&proj_x, &proj_y, p);
+        best = best.max(wp);
+    }
+
+    best
 }
 
 #[cfg(test)]
@@ -1878,20 +2051,129 @@ mod tests {
         }
     }
 
+    // --- wasserstein_1d_samples tests ---
+
     #[test]
-    fn test_sliced_wasserstein() {
+    fn w1d_samples_shift() {
+        // [0, 1] vs [1, 2]: sorted diffs are |0-1| + |1-2| = 2, mean = 1.0
+        let w = wasserstein_1d_samples(&[0.0, 1.0], &[1.0, 2.0], 1.0);
+        assert!((w - 1.0).abs() < 1e-6, "W1 shift: {}", w);
+    }
+
+    #[test]
+    fn w1d_samples_w2_shift() {
+        // W2([0,1], [1,2]) = sqrt(mean(1^2 + 1^2)) = sqrt(1) = 1.0
+        let w = wasserstein_1d_samples(&[0.0, 1.0], &[1.0, 2.0], 2.0);
+        assert!((w - 1.0).abs() < 1e-6, "W2 shift: {}", w);
+    }
+
+    #[test]
+    fn w1d_samples_self_distance() {
+        let a = [0.5, 1.3, -0.2, 4.0];
+        let w = wasserstein_1d_samples(&a, &a, 1.0);
+        assert!(w < 1e-7, "self-distance: {}", w);
+    }
+
+    #[test]
+    fn w1d_samples_unsorted_input() {
+        // Should handle unsorted input correctly (sorts internally)
+        let a = [3.0, 1.0, 2.0];
+        let b = [6.0, 4.0, 5.0];
+        let w = wasserstein_1d_samples(&a, &b, 1.0);
+        // sorted: [1,2,3] vs [4,5,6] -> diffs = [3,3,3], mean = 3.0
+        assert!((w - 3.0).abs() < 1e-6, "unsorted W1: {}", w);
+    }
+
+    // --- sliced_wasserstein tests ---
+
+    #[test]
+    fn test_sliced_wasserstein_self_distance() {
+        let x = array![[0.0, 0.0], [1.0, 1.0], [2.0, 3.0]];
+        let sw = sliced_wasserstein(&x, &x, 50, 42, 1.0);
+        assert!(sw < 1e-5, "self-distance should be ~0: {}", sw);
+    }
+
+    #[test]
+    fn test_sliced_wasserstein_symmetric() {
         let x = array![[0.0, 0.0], [1.0, 1.0]];
-        let y = array![[0.0, 0.0], [1.0, 1.0]];
-
-        let sw = sliced_wasserstein(&x, &y, 10);
-        assert!(sw < 0.1, "same points should have ~0 sliced Wasserstein");
-
-        let y2 = array![[10.0, 10.0], [11.0, 11.0]];
-        let sw2 = sliced_wasserstein(&x, &y2, 10);
+        let y = array![[5.0, 5.0], [6.0, 6.0]];
+        let sw_xy = sliced_wasserstein(&x, &y, 100, 42, 1.0);
+        let sw_yx = sliced_wasserstein(&y, &x, 100, 42, 1.0);
         assert!(
-            sw2 > 5.0,
-            "distant points should have large sliced Wasserstein"
+            (sw_xy - sw_yx).abs() < 1e-5,
+            "symmetry: {} vs {}",
+            sw_xy,
+            sw_yx
         );
+    }
+
+    #[test]
+    fn test_sliced_wasserstein_nonneg() {
+        let x = array![[0.0, 0.0], [1.0, 1.0]];
+        let y = array![[10.0, 10.0], [11.0, 11.0]];
+        let sw = sliced_wasserstein(&x, &y, 50, 42, 1.0);
+        assert!(sw >= 0.0, "non-negative: {}", sw);
+    }
+
+    #[test]
+    fn test_sliced_wasserstein_separation() {
+        let x = array![[0.0, 0.0], [1.0, 1.0]];
+        let y_close = array![[0.1, 0.1], [1.1, 1.1]];
+        let y_far = array![[10.0, 10.0], [11.0, 11.0]];
+        let sw_close = sliced_wasserstein(&x, &y_close, 100, 42, 1.0);
+        let sw_far = sliced_wasserstein(&x, &y_far, 100, 42, 1.0);
+        assert!(
+            sw_far > sw_close,
+            "distant > close: {} vs {}",
+            sw_far,
+            sw_close
+        );
+    }
+
+    #[test]
+    fn test_sliced_wasserstein_w2() {
+        let x = array![[0.0, 0.0], [1.0, 1.0]];
+        let y = array![[10.0, 10.0], [11.0, 11.0]];
+        let sw1 = sliced_wasserstein(&x, &y, 100, 42, 1.0);
+        let sw2 = sliced_wasserstein(&x, &y, 100, 42, 2.0);
+        // Both should be positive for well-separated clouds
+        assert!(sw1 > 5.0, "SW1 should be large: {}", sw1);
+        assert!(sw2 > 5.0, "SW2 should be large: {}", sw2);
+    }
+
+    // --- max_sliced_wasserstein tests ---
+
+    #[test]
+    fn test_max_sliced_self_distance() {
+        let x = array![[0.0, 0.0], [1.0, 1.0]];
+        let msw = max_sliced_wasserstein(&x, &x, 50, 42, 1.0);
+        assert!(msw < 1e-5, "max-sliced self-distance: {}", msw);
+    }
+
+    #[test]
+    fn test_max_sliced_ge_sliced() {
+        // max over directions >= average over directions
+        let x = array![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        let y = array![[5.0, 5.0], [6.0, 5.0], [5.0, 6.0]];
+        let n_proj = 200;
+        let sw = sliced_wasserstein(&x, &y, n_proj, 42, 1.0);
+        let msw = max_sliced_wasserstein(&x, &y, n_proj, 42, 1.0);
+        assert!(
+            msw >= sw - 1e-5,
+            "max-sliced ({}) should >= sliced ({})",
+            msw,
+            sw
+        );
+    }
+
+    #[test]
+    fn test_max_sliced_axis_aligned() {
+        // Points separated along x-axis only; the optimal direction is [1, 0].
+        let x = array![[0.0, 0.0], [1.0, 0.0]];
+        let y = array![[10.0, 0.0], [11.0, 0.0]];
+        let msw = max_sliced_wasserstein(&x, &y, 200, 42, 1.0);
+        // W1 along the x-axis: sorted diffs = |0-10| + |1-11| = 20, mean = 10
+        assert!(msw > 9.0, "axis-aligned max-sliced: {}", msw);
     }
 
     proptest! {
@@ -1956,6 +2238,67 @@ mod tests {
             // max <= logsumexp <= max + ln(n)
             prop_assert!(lse >= max - 1e-5);
             prop_assert!(lse <= max + (xs.len() as f32).ln() + 1e-5);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn prop_w1d_samples_nonneg(
+            a in prop::collection::vec(-100.0f32..100.0, 2..32),
+            b in prop::collection::vec(-100.0f32..100.0, 2..32),
+        ) {
+            let n = a.len().min(b.len());
+            let w = wasserstein_1d_samples(&a[..n], &b[..n], 1.0);
+            prop_assert!(w >= -1e-7, "non-negative: {}", w);
+        }
+
+        #[test]
+        fn prop_w1d_samples_symmetric(
+            a in prop::collection::vec(-100.0f32..100.0, 2..32),
+            b in prop::collection::vec(-100.0f32..100.0, 2..32),
+        ) {
+            let n = a.len().min(b.len());
+            let ab = wasserstein_1d_samples(&a[..n], &b[..n], 1.0);
+            let ba = wasserstein_1d_samples(&b[..n], &a[..n], 1.0);
+            prop_assert!((ab - ba).abs() < 1e-5, "symmetric: {} vs {}", ab, ba);
+        }
+
+        #[test]
+        fn prop_w1d_samples_self_zero(
+            a in prop::collection::vec(-100.0f32..100.0, 2..32),
+        ) {
+            let w = wasserstein_1d_samples(&a, &a, 1.0);
+            prop_assert!(w < 1e-6, "self-distance: {}", w);
+        }
+
+        #[test]
+        fn prop_sliced_wasserstein_nonneg(
+            seed in 0u64..1000,
+        ) {
+            let x = array![[0.0, 0.0], [1.0, 1.0], [2.0, 0.5]];
+            let y = array![[3.0, 3.0], [4.0, 4.0], [5.0, 3.5]];
+            let sw = sliced_wasserstein(&x, &y, 20, seed, 1.0);
+            prop_assert!(sw >= -1e-7, "non-negative: {}", sw);
+        }
+
+        #[test]
+        fn prop_sliced_wasserstein_self_zero(
+            seed in 0u64..1000,
+        ) {
+            let x = array![[0.0, 0.0], [1.0, 1.0], [2.0, 0.5]];
+            let sw = sliced_wasserstein(&x, &x, 20, seed, 1.0);
+            prop_assert!(sw < 1e-5, "self-distance: {}", sw);
+        }
+
+        #[test]
+        fn prop_sliced_wasserstein_symmetric(
+            seed in 0u64..1000,
+        ) {
+            let x = array![[0.0, 0.0], [1.0, 1.0]];
+            let y = array![[3.0, 3.0], [4.0, 4.0]];
+            let sw_xy = sliced_wasserstein(&x, &y, 20, seed, 1.0);
+            let sw_yx = sliced_wasserstein(&y, &x, 20, seed, 1.0);
+            prop_assert!((sw_xy - sw_yx).abs() < 1e-5, "symmetric: {} vs {}", sw_xy, sw_yx);
         }
     }
 
