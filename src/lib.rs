@@ -83,6 +83,7 @@ use ndarray::{Array1, Array2};
 use thiserror::Error;
 
 pub mod flow;
+pub mod gaussian;
 pub mod gromov;
 pub mod semidiscrete;
 pub mod sparse;
