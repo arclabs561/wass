@@ -98,6 +98,7 @@ pub use flow::{flow_drift, VectorField};
 
 /// Optimal Transport error variants.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     /// Distributions have different lengths.
     #[error("distributions have different lengths: {0} vs {1}")]
