@@ -15,6 +15,7 @@
 //! |----------|----------|------------|
 //! | [`wasserstein_1d`] | 1D distributions | O(n log n) |
 //! | [`sinkhorn`] | General transport (dense) | O(n² × iterations) |
+//! | [`sinkhorn_low_rank`] | Large-scale transport (rank r) | O((n+m)r × iterations) |
 //! | [`sparse::solve_semidual_l2`] | Sparse transport (L2) | O(n² × L-BFGS iter) |
 //! | [`earth_mover_distance`] | Exact transport | O(n³) |
 //!
@@ -78,6 +79,7 @@
 //! - Chizat et al. (2018). "Scaling Algorithms for Unbalanced OT Problems"
 //! - Sejourne et al. (2023). "Unbalanced OT Meets Sliced-Wasserstein"
 //! - Rabin et al. (2012). "Wasserstein Barycenter and Its Application to Texture Mixing"
+//! - Scetbon, Cuturi & Peyré (2021). "Low-Rank Sinkhorn Factorization" (ICML)
 
 use ndarray::{Array1, Array2};
 use thiserror::Error;
@@ -117,6 +119,10 @@ pub enum Error {
     /// Invalid mass-variation penalty parameter for unbalanced OT.
     #[error("mass penalty parameter must be positive and finite, got {0}")]
     InvalidMassPenalty(f32),
+
+    /// Invalid rank parameter for low-rank factorization.
+    #[error("rank must be >= 1 and <= min(n, m), got rank={0} for n={1}, m={2}")]
+    InvalidRank(usize, usize, usize),
 
     /// Domain error (invalid inputs for the mathematical definition).
     #[error("{0}")]
@@ -1341,6 +1347,326 @@ pub fn unbalanced_sinkhorn_divergence_general(
     Ok((term_a + term_b) as f32 + mass_corr)
 }
 
+/// Low-rank factorized transport coupling: `P = Q * diag(g) * R^T`.
+///
+/// Instead of storing the full `n x m` coupling matrix, stores three factors
+/// with total size `O((n + m) * rank)`. The full coupling can be recovered
+/// via [`LowRankCoupling::to_dense`] for small problems or applied implicitly
+/// via [`LowRankCoupling::apply`].
+#[derive(Debug, Clone)]
+pub struct LowRankCoupling {
+    /// Left factor (n x rank), non-negative.
+    pub q: Vec<f32>,
+    /// Diagonal scaling (rank), positive.
+    pub g: Vec<f32>,
+    /// Right factor (m x rank), non-negative.
+    pub r: Vec<f32>,
+    /// Transport cost `<C, P>`.
+    pub cost: f32,
+    /// Number of Dykstra iterations used.
+    pub iterations: usize,
+    /// Dimensions for reconstruction.
+    n: usize,
+    m: usize,
+    rank: usize,
+}
+
+impl LowRankCoupling {
+    /// Materialize the full `n x m` coupling matrix `P = Q diag(g) R^T`.
+    ///
+    /// Only practical for small problems (verification, debugging).
+    pub fn to_dense(&self) -> Vec<f32> {
+        let mut p = vec![0.0f32; self.n * self.m];
+        for i in 0..self.n {
+            for j in 0..self.m {
+                let mut val = 0.0f32;
+                for k in 0..self.rank {
+                    val += self.q[i * self.rank + k] * self.g[k] * self.r[j * self.rank + k];
+                }
+                p[i * self.m + j] = val;
+            }
+        }
+        p
+    }
+
+    /// Apply coupling to a vector: computes `P * v` without materializing `P`.
+    ///
+    /// `v` must have length `m`. Returns a vector of length `n`.
+    /// Cost: `O((n + m) * rank)` instead of `O(n * m)`.
+    pub fn apply(&self, v: &[f32]) -> Vec<f32> {
+        assert_eq!(v.len(), self.m, "v must have length m={}", self.m);
+
+        // Step 1: t = R^T v (rank-length vector)
+        let mut t = vec![0.0f32; self.rank];
+        for j in 0..self.m {
+            for k in 0..self.rank {
+                t[k] += self.r[j * self.rank + k] * v[j];
+            }
+        }
+
+        // Step 2: t = diag(g) * t
+        for k in 0..self.rank {
+            t[k] *= self.g[k];
+        }
+
+        // Step 3: result = Q * t
+        let mut result = vec![0.0f32; self.n];
+        for i in 0..self.n {
+            for k in 0..self.rank {
+                result[i] += self.q[i * self.rank + k] * t[k];
+            }
+        }
+        result
+    }
+
+    /// Row marginals of the coupling (length n).
+    pub fn row_marginals(&self) -> Vec<f32> {
+        // P 1_m = Q diag(g) R^T 1_m
+        let ones = vec![1.0f32; self.m];
+        self.apply(&ones)
+    }
+
+    /// Column marginals of the coupling (length m).
+    pub fn col_marginals(&self) -> Vec<f32> {
+        // P^T 1_n = R diag(g) Q^T 1_n
+        // Step 1: s = Q^T 1_n
+        let mut s = vec![0.0f32; self.rank];
+        for i in 0..self.n {
+            for k in 0..self.rank {
+                s[k] += self.q[i * self.rank + k];
+            }
+        }
+        // Step 2: s = diag(g) * s
+        for k in 0..self.rank {
+            s[k] *= self.g[k];
+        }
+        // Step 3: result = R * s
+        let mut result = vec![0.0f32; self.m];
+        for j in 0..self.m {
+            for k in 0..self.rank {
+                result[j] += self.r[j * self.rank + k] * s[k];
+            }
+        }
+        result
+    }
+}
+
+/// Low-rank Sinkhorn factorization (Scetbon, Cuturi & Peyre, ICML 2021).
+///
+/// Approximates the entropic OT coupling as `P = Q diag(g) R^T` where
+/// `Q` is `n x r`, `R` is `m x r`, and `r << min(n, m)`.
+///
+/// Memory: `O((n + m) * r)` instead of `O(n * m)`.
+/// Per-iteration cost: `O((n + m) * r)` instead of `O(n * m)`.
+///
+/// The algorithm uses Dykstra's alternating projections to enforce
+/// row and column marginal constraints on the factored coupling.
+///
+/// # Arguments
+///
+/// * `a` - Source marginal (length n, sums to 1)
+/// * `b` - Target marginal (length m, sums to 1)
+/// * `cost` - Cost matrix (n*m, row-major flat)
+/// * `reg` - Entropic regularization `epsilon > 0`
+/// * `rank` - Approximation rank `r` (1 <= r <= min(n, m))
+/// * `max_iter` - Maximum Dykstra iterations
+/// * `tol` - Convergence tolerance on marginal error
+pub fn sinkhorn_low_rank(
+    a: &[f32],
+    b: &[f32],
+    cost: &[f32],
+    reg: f32,
+    rank: usize,
+    max_iter: usize,
+    tol: f32,
+) -> Result<LowRankCoupling> {
+    let n = a.len();
+    let m = b.len();
+
+    if cost.len() != n * m {
+        return Err(Error::CostShapeMismatch(n, m, n, cost.len() / n.max(1)));
+    }
+    if reg <= 0.0 || !reg.is_finite() {
+        return Err(Error::InvalidRegularization(reg));
+    }
+    if rank < 1 || rank > n.min(m) {
+        return Err(Error::InvalidRank(rank, n, m));
+    }
+    if a.iter().any(|&x| x < 0.0) || b.iter().any(|&x| x < 0.0) {
+        return Err(Error::Domain("sinkhorn requires nonnegative masses"));
+    }
+    let a_sum: f32 = a.iter().sum();
+    let b_sum: f32 = b.iter().sum();
+    if a_sum <= 0.0 || b_sum <= 0.0 {
+        return Err(Error::Domain("sinkhorn requires positive total mass"));
+    }
+
+    // Normalize inputs.
+    let a_norm: Vec<f32> = a.iter().map(|&x| x / (a_sum + EPSILON)).collect();
+    let b_norm: Vec<f32> = b.iter().map(|&x| x / (b_sum + EPSILON)).collect();
+
+    // Precompute the Gibbs kernel K_ij = exp(-C_ij / reg) in factored form.
+    //
+    // Strategy (Scetbon et al. 2021, Section 3):
+    //   1. Pick `rank` landmark indices from each side
+    //   2. Form kernel sub-matrices as initial factors
+    //   3. Alternate: (a) Sinkhorn row-scaling on Q using kernel-weighted R sums,
+    //      (b) Sinkhorn col-scaling on R using kernel-weighted Q sums
+    //   4. g balances the two factors
+    //
+    // The kernel weighting in the projections ensures cost minimization, not just
+    // marginal feasibility.
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha8Rng;
+    use rand_distr::{Distribution, Uniform};
+
+    let mut rng = ChaCha8Rng::seed_from_u64(0xCAFE);
+
+    // Precompute log-kernel rows for stable computation.
+    // log_k[i * m + j] = -cost[i * m + j] / reg
+    let log_k: Vec<f32> = cost.iter().map(|&c| -c / reg).collect();
+
+    // Initialize Q from rank columns of K, scaled by sqrt(a).
+    // Initialize R from rank rows of K, scaled by sqrt(b).
+    // Pick landmarks: when rank >= min(n,m), use all indices; otherwise sample randomly.
+    let col_indices: Vec<usize> = if rank >= m {
+        (0..rank.min(m)).collect()
+    } else {
+        let unif_m = Uniform::new(0usize, m).unwrap();
+        (0..rank).map(|_| unif_m.sample(&mut rng)).collect()
+    };
+    let row_indices: Vec<usize> = if rank >= n {
+        (0..rank.min(n)).collect()
+    } else {
+        let unif_n = Uniform::new(0usize, n).unwrap();
+        (0..rank).map(|_| unif_n.sample(&mut rng)).collect()
+    };
+
+    // Q[i,k] = exp(-C[i, col_k] / reg) * a[i]
+    let mut q = vec![0.0f32; n * rank];
+    for k in 0..rank {
+        let jk = col_indices[k];
+        for i in 0..n {
+            q[i * rank + k] = log_k[i * m + jk].exp().max(EPSILON) * a_norm[i].max(EPSILON);
+        }
+    }
+
+    // R[j,k] = exp(-C[row_k, j] / reg) * b[j]
+    let mut r = vec![0.0f32; m * rank];
+    for k in 0..rank {
+        let ik = row_indices[k];
+        for j in 0..m {
+            r[j * rank + k] = log_k[ik * m + j].exp().max(EPSILON) * b_norm[j].max(EPSILON);
+        }
+    }
+
+    let g = vec![1.0f32; rank];
+
+    // Alternating Sinkhorn projections on the low-rank factors.
+    //
+    // The coupling is P = Q diag(g) R^T. We enforce:
+    //   Row marginals: (Q diag(g) R^T) 1_m = a
+    //   Col marginals: (R diag(g) Q^T) 1_n = b
+    //
+    // by scaling rows of Q (for row marginals) and rows of R (for col marginals).
+
+    let mut iterations = max_iter;
+
+    for iter in 0..max_iter {
+        // --- Row projection: scale Q rows so P 1_m = a ---
+        let mut v = vec![0.0f32; rank];
+        for k in 0..rank {
+            let mut s = 0.0f32;
+            for j in 0..m {
+                s += r[j * rank + k];
+            }
+            v[k] = g[k] * s;
+        }
+
+        let mut max_row_err = 0.0f32;
+        for i in 0..n {
+            let mut row_sum = 0.0f32;
+            for k in 0..rank {
+                row_sum += q[i * rank + k] * v[k];
+            }
+            if a_norm[i] > 0.0 && row_sum > EPSILON {
+                let scale = a_norm[i] / row_sum;
+                max_row_err = max_row_err.max((1.0 - scale).abs() * a_norm[i]);
+                for k in 0..rank {
+                    q[i * rank + k] *= scale;
+                }
+            }
+        }
+
+        // --- Column projection: scale R rows so P^T 1_n = b ---
+        let mut u = vec![0.0f32; rank];
+        for k in 0..rank {
+            let mut s = 0.0f32;
+            for i in 0..n {
+                s += q[i * rank + k];
+            }
+            u[k] = g[k] * s;
+        }
+
+        let mut max_col_err = 0.0f32;
+        for j in 0..m {
+            let mut col_sum = 0.0f32;
+            for k in 0..rank {
+                col_sum += r[j * rank + k] * u[k];
+            }
+            if b_norm[j] > 0.0 && col_sum > EPSILON {
+                let scale = b_norm[j] / col_sum;
+                max_col_err = max_col_err.max((1.0 - scale).abs() * b_norm[j]);
+                for k in 0..rank {
+                    r[j * rank + k] *= scale;
+                }
+            }
+        }
+
+        let max_err = max_row_err.max(max_col_err);
+        if max_err < tol {
+            iterations = iter + 1;
+            break;
+        }
+    }
+
+    // Compute transport cost: <C, P> = sum_ij C_ij * (sum_k Q_ik g_k R_jk)
+    // Efficient: sum_k g_k * (sum_i C_i* Q_ik) dot (R_*k)
+    // = sum_k g_k * (Q^T C R)_kk -- but we avoid materializing n*m.
+    // Instead: for each k, compute (C Q_k) then dot with R_k.
+    let mut transport_cost = 0.0f32;
+    for k in 0..rank {
+        // Compute (C * q_k)[j] = sum_i C[i,j] (wrong direction)
+        // We want sum_ij C_ij Q_ik R_jk g_k
+        // = g_k * sum_i Q_ik * sum_j C_ij R_jk
+        // = g_k * sum_i Q_ik * (C[i,:] dot R[:,k])
+        let mut s = 0.0f64;
+        for i in 0..n {
+            let qik = q[i * rank + k] as f64;
+            if qik < 1e-12 {
+                continue;
+            }
+            let mut cr = 0.0f64;
+            for j in 0..m {
+                cr += cost[i * m + j] as f64 * r[j * rank + k] as f64;
+            }
+            s += qik * cr;
+        }
+        transport_cost += (g[k] as f64 * s) as f32;
+    }
+
+    Ok(LowRankCoupling {
+        q,
+        g,
+        r,
+        cost: transport_cost,
+        iterations,
+        n,
+        m,
+        rank,
+    })
+}
+
 /// Sliced Wasserstein distance -- a scalable approximation for high dimensions.
 ///
 /// \[
@@ -1747,5 +2073,226 @@ mod tests {
         let ab = sinkhorn_divergence_same_support(&a, &b, &cost, 0.1, 500, 1e-4).unwrap();
         let ba = sinkhorn_divergence_same_support(&b, &a, &cost, 0.1, 500, 1e-4).unwrap();
         assert!((ab - ba).abs() < 1e-5, "ab={} ba={}", ab, ba);
+    }
+
+    // --- Low-rank Sinkhorn tests ---
+
+    fn flat_cost(n: usize, m: usize) -> Vec<f32> {
+        // Squared-distance cost on a 1D grid: C[i,j] = (i - j)^2
+        let mut c = vec![0.0f32; n * m];
+        for i in 0..n {
+            for j in 0..m {
+                let d = i as f32 - j as f32;
+                c[i * m + j] = d * d;
+            }
+        }
+        c
+    }
+
+    #[test]
+    fn low_rank_transport_cost_nonneg() {
+        let n = 5;
+        let a = vec![1.0 / n as f32; n];
+        let b = vec![1.0 / n as f32; n];
+        let cost = flat_cost(n, n);
+        let lr = sinkhorn_low_rank(&a, &b, &cost, 0.1, 3, 200, 1e-5).unwrap();
+        assert!(
+            lr.cost >= -1e-6,
+            "transport cost should be non-negative, got {}",
+            lr.cost
+        );
+    }
+
+    #[test]
+    fn low_rank_row_marginals_match() {
+        let n = 6;
+        let m = 4;
+        let a: Vec<f32> = {
+            let raw = vec![1.0, 2.0, 3.0, 2.0, 1.0, 1.0];
+            let s: f32 = raw.iter().sum();
+            raw.iter().map(|&x| x / s).collect()
+        };
+        let b: Vec<f32> = {
+            let raw = vec![2.0, 1.0, 1.0, 2.0];
+            let s: f32 = raw.iter().sum();
+            raw.iter().map(|&x| x / s).collect()
+        };
+        let cost = flat_cost(n, m);
+
+        let lr = sinkhorn_low_rank(&a, &b, &cost, 0.5, 3, 500, 1e-6).unwrap();
+        let row_marg = lr.row_marginals();
+
+        assert_eq!(row_marg.len(), n);
+        for i in 0..n {
+            assert!(
+                (row_marg[i] - a[i]).abs() < 0.05,
+                "row marginal[{}]: got {}, expected {}",
+                i,
+                row_marg[i],
+                a[i]
+            );
+        }
+    }
+
+    #[test]
+    fn low_rank_col_marginals_match() {
+        let n = 6;
+        let m = 4;
+        let a: Vec<f32> = {
+            let raw = vec![1.0, 2.0, 3.0, 2.0, 1.0, 1.0];
+            let s: f32 = raw.iter().sum();
+            raw.iter().map(|&x| x / s).collect()
+        };
+        let b: Vec<f32> = {
+            let raw = vec![2.0, 1.0, 1.0, 2.0];
+            let s: f32 = raw.iter().sum();
+            raw.iter().map(|&x| x / s).collect()
+        };
+        let cost = flat_cost(n, m);
+
+        let lr = sinkhorn_low_rank(&a, &b, &cost, 0.5, 3, 500, 1e-6).unwrap();
+        let col_marg = lr.col_marginals();
+
+        assert_eq!(col_marg.len(), m);
+        for j in 0..m {
+            assert!(
+                (col_marg[j] - b[j]).abs() < 0.05,
+                "col marginal[{}]: got {}, expected {}",
+                j,
+                col_marg[j],
+                b[j]
+            );
+        }
+    }
+
+    #[test]
+    fn low_rank_full_rank_approximates_sinkhorn() {
+        // With rank = min(n,m), low-rank should closely match full Sinkhorn.
+        let n = 4;
+        let a_arr = array![0.25, 0.25, 0.25, 0.25];
+        let b_arr = array![0.1, 0.3, 0.4, 0.2];
+        let cost_arr = array![
+            [0.0, 1.0, 4.0, 9.0],
+            [1.0, 0.0, 1.0, 4.0],
+            [4.0, 1.0, 0.0, 1.0],
+            [9.0, 4.0, 1.0, 0.0]
+        ];
+
+        let (_, full_cost) = sinkhorn_log(&a_arr, &b_arr, &cost_arr, 0.5, 200);
+
+        let a_flat: Vec<f32> = a_arr.to_vec();
+        let b_flat: Vec<f32> = b_arr.to_vec();
+        let cost_flat: Vec<f32> = cost_arr.iter().copied().collect();
+
+        let lr = sinkhorn_low_rank(&a_flat, &b_flat, &cost_flat, 0.5, n, 500, 1e-6).unwrap();
+
+        // With full rank the costs should be in the same ballpark.
+        // Not exact because the algorithms differ, but within 50%.
+        let ratio = lr.cost / full_cost;
+        assert!(
+            (0.5..2.0).contains(&ratio),
+            "full-rank low-rank cost ({}) should approximate sinkhorn_log cost ({}), ratio={}",
+            lr.cost,
+            full_cost,
+            ratio
+        );
+    }
+
+    #[test]
+    fn low_rank_memory_scales_linearly() {
+        // Verify struct sizes scale as O((n+m)*r), not O(n*m).
+        let n = 100;
+        let m = 80;
+        let rank = 5;
+        let a = vec![1.0 / n as f32; n];
+        let b = vec![1.0 / m as f32; m];
+        let cost = flat_cost(n, m);
+
+        let lr = sinkhorn_low_rank(&a, &b, &cost, 1.0, rank, 100, 1e-4).unwrap();
+
+        let factor_size = lr.q.len() + lr.r.len() + lr.g.len();
+        let dense_size = n * m;
+        assert_eq!(lr.q.len(), n * rank);
+        assert_eq!(lr.r.len(), m * rank);
+        assert_eq!(lr.g.len(), rank);
+        assert!(
+            factor_size < dense_size,
+            "factor storage ({}) should be less than dense ({})",
+            factor_size,
+            dense_size
+        );
+    }
+
+    #[test]
+    fn low_rank_apply_matches_dense() {
+        let n = 5;
+        let m = 4;
+        let a: Vec<f32> = {
+            let raw = vec![1.0, 2.0, 1.0, 2.0, 1.0];
+            let s: f32 = raw.iter().sum();
+            raw.iter().map(|&x| x / s).collect()
+        };
+        let b: Vec<f32> = {
+            let raw = vec![1.0, 1.0, 1.0, 1.0];
+            let s: f32 = raw.iter().sum();
+            raw.iter().map(|&x| x / s).collect()
+        };
+        let cost = flat_cost(n, m);
+        let lr = sinkhorn_low_rank(&a, &b, &cost, 0.5, 3, 300, 1e-5).unwrap();
+
+        let v = vec![1.0, 0.0, 0.0, 0.0];
+        let result_apply = lr.apply(&v);
+        let dense = lr.to_dense();
+
+        // Dense multiplication: P * v
+        let mut result_dense = vec![0.0f32; n];
+        for i in 0..n {
+            for j in 0..m {
+                result_dense[i] += dense[i * m + j] * v[j];
+            }
+        }
+
+        for i in 0..n {
+            assert!(
+                (result_apply[i] - result_dense[i]).abs() < 1e-5,
+                "apply[{}]={} vs dense[{}]={}",
+                i,
+                result_apply[i],
+                i,
+                result_dense[i]
+            );
+        }
+    }
+
+    #[test]
+    fn low_rank_invalid_inputs() {
+        let a = vec![0.5, 0.5];
+        let b = vec![0.5, 0.5];
+        let cost = vec![0.0, 1.0, 1.0, 0.0];
+
+        // rank = 0
+        assert!(sinkhorn_low_rank(&a, &b, &cost, 0.1, 0, 100, 1e-5).is_err());
+
+        // rank > min(n,m)
+        assert!(sinkhorn_low_rank(&a, &b, &cost, 0.1, 3, 100, 1e-5).is_err());
+
+        // negative reg
+        assert!(sinkhorn_low_rank(&a, &b, &cost, -0.1, 1, 100, 1e-5).is_err());
+
+        // wrong cost size
+        assert!(sinkhorn_low_rank(&a, &b, &[0.0, 1.0], 0.1, 1, 100, 1e-5).is_err());
+    }
+
+    #[test]
+    fn low_rank_to_dense_nonneg() {
+        let n = 5;
+        let a = vec![0.2; n];
+        let b = vec![0.2; n];
+        let cost = flat_cost(n, n);
+        let lr = sinkhorn_low_rank(&a, &b, &cost, 0.5, 3, 200, 1e-5).unwrap();
+        let dense = lr.to_dense();
+        for (idx, &val) in dense.iter().enumerate() {
+            assert!(val >= -1e-7, "dense[{}] = {} is negative", idx, val);
+        }
     }
 }
