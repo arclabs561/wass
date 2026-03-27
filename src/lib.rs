@@ -87,6 +87,7 @@ pub mod gaussian;
 pub mod gromov;
 pub mod semidiscrete;
 pub mod sparse;
+pub mod wfr;
 
 pub use flow::{flow_drift, VectorField};
 
