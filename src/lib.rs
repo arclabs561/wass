@@ -19,6 +19,7 @@
 //! | [`max_sliced_wasserstein`] | High-dim point clouds (max projection) | O(L n log n) |
 //! | [`sinkhorn`] | General transport (dense) | O(n² × iterations) |
 //! | [`sinkhorn_low_rank`] | Large-scale transport (rank r) | O((n+m)r × iterations) |
+//! | [`sinkhorn_hierarchical`] | Large-scale transport (tree partition) | O(k² + local subproblems) |
 //! | [`sparse::solve_semidual_l2`] | Sparse transport (L2) | O(n² × L-BFGS iter) |
 //! | [`earth_mover_distance`] | Exact transport | O(n³) |
 //!
@@ -127,6 +128,10 @@ pub enum Error {
     /// Invalid rank parameter for low-rank factorization.
     #[error("rank must be >= 1 and <= min(n, m), got rank={0} for n={1}, m={2}")]
     InvalidRank(usize, usize, usize),
+
+    /// Invalid branching factor for hierarchical OT.
+    #[error("branching must be >= 2 and <= min(n, m), got branching={0} for n={1}, m={2}")]
+    InvalidBranching(usize, usize, usize),
 
     /// Domain error (invalid inputs for the mathematical definition).
     #[error("{0}")]
@@ -1944,6 +1949,342 @@ pub fn max_sliced_wasserstein(
     best
 }
 
+/// Hierarchical tree-partitioned Sinkhorn for large-scale optimal transport.
+///
+/// Recursively partitions source and target points into `branching` groups,
+/// solves a coarse OT problem between group centroids, then refines by solving
+/// local subproblems for each pair with nonzero coarse coupling.
+///
+/// This reduces the cost from `O(nm)` per Sinkhorn iteration to
+/// `O(branching^2 + sum(n_i * m_j))` where the sum is over nonzero coarse pairs,
+/// which is much smaller when the transport plan is sparse (i.e., most mass
+/// moves between nearby groups).
+///
+/// **Partitioning**: points are sorted by their mean cost (a 1D projection of the
+/// cost structure) and split into equal-sized groups. This avoids requiring a
+/// full k-means implementation while still producing spatially coherent groups.
+///
+/// **Depth**: `max_depth = 1` means a single coarse-then-refine pass.
+/// `max_depth > 1` applies the same partitioning recursively to each subproblem.
+///
+/// # Arguments
+///
+/// * `a` - Source marginal (length n, sums to 1)
+/// * `b` - Target marginal (length m, sums to 1)
+/// * `cost` - n x m cost matrix, row-major flat
+/// * `n` - Number of source points
+/// * `m` - Number of target points
+/// * `reg` - Entropic regularization
+/// * `branching` - Number of groups at each level (2..=min(n,m))
+/// * `max_depth` - Recursion depth (1 = single coarse solve)
+/// * `max_iter` - Max Sinkhorn iterations per subproblem
+/// * `tol` - Convergence tolerance
+///
+/// # Returns
+///
+/// `(transport_cost, coupling)` where coupling is n x m row-major.
+///
+/// # References
+///
+/// Halmos, Gold, Liu, Raphael (2025). "Hierarchical Refinement: Optimal
+/// Transport to Infinity and Beyond."
+pub fn sinkhorn_hierarchical(
+    a: &[f32],
+    b: &[f32],
+    cost: &[f32],
+    n: usize,
+    m: usize,
+    reg: f32,
+    branching: usize,
+    max_depth: usize,
+    max_iter: usize,
+    tol: f32,
+) -> Result<(f32, Vec<f32>)> {
+    // --- validation ---
+    if cost.len() != n * m {
+        return Err(Error::CostShapeMismatch(n, m, n, cost.len() / n.max(1)));
+    }
+    if reg <= 0.0 || !reg.is_finite() {
+        return Err(Error::InvalidRegularization(reg));
+    }
+    if a.len() != n || b.len() != m {
+        return Err(Error::CostShapeMismatch(n, m, a.len(), b.len()));
+    }
+    if a.iter().any(|&x| x < 0.0) || b.iter().any(|&x| x < 0.0) {
+        return Err(Error::Domain("sinkhorn requires nonnegative masses"));
+    }
+    let a_sum: f32 = a.iter().sum();
+    let b_sum: f32 = b.iter().sum();
+    if a_sum <= 0.0 || b_sum <= 0.0 {
+        return Err(Error::Domain("sinkhorn requires positive total mass"));
+    }
+    if branching < 2 || branching > n.min(m) {
+        return Err(Error::InvalidBranching(branching, n, m));
+    }
+
+    // Normalize.
+    let a_norm: Vec<f32> = a.iter().map(|&x| x / a_sum).collect();
+    let b_norm: Vec<f32> = b.iter().map(|&x| x / b_sum).collect();
+
+    let mut coupling = vec![0.0f32; n * m];
+    hierarchical_recurse(
+        &a_norm,
+        &b_norm,
+        cost,
+        n,
+        m,
+        &(0..n).collect::<Vec<_>>(),
+        &(0..m).collect::<Vec<_>>(),
+        reg,
+        branching,
+        max_depth,
+        max_iter,
+        tol,
+        1.0, // total mass at top level
+        &mut coupling,
+    )?;
+
+    let transport_cost: f32 = coupling.iter().zip(cost.iter()).map(|(&p, &c)| p * c).sum();
+
+    Ok((transport_cost, coupling))
+}
+
+/// Partition `indices` into `k` groups by sorting on mean cost (a cheap 1D proxy).
+fn partition_by_cost_projection(
+    cost_row: impl Fn(usize) -> f32,
+    indices: &[usize],
+    k: usize,
+) -> Vec<Vec<usize>> {
+    let mut indexed: Vec<(usize, f32)> = indices.iter().map(|&i| (i, cost_row(i))).collect();
+    indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let total = indexed.len();
+    let base_size = total / k;
+    let remainder = total % k;
+
+    let mut groups = Vec::with_capacity(k);
+    let mut offset = 0;
+    for g in 0..k {
+        let size = base_size + if g < remainder { 1 } else { 0 };
+        let group: Vec<usize> = indexed[offset..offset + size]
+            .iter()
+            .map(|&(i, _)| i)
+            .collect();
+        if !group.is_empty() {
+            groups.push(group);
+        }
+        offset += size;
+    }
+    groups
+}
+
+/// Compute the centroid cost between two groups: average cost across all pairs.
+fn group_cost(src_group: &[usize], tgt_group: &[usize], cost: &[f32], m_cols: usize) -> f32 {
+    if src_group.is_empty() || tgt_group.is_empty() {
+        return 0.0;
+    }
+    let mut total = 0.0f32;
+    for &i in src_group {
+        for &j in tgt_group {
+            total += cost[i * m_cols + j];
+        }
+    }
+    total / (src_group.len() * tgt_group.len()) as f32
+}
+
+/// Solve a local Sinkhorn subproblem and write scaled coupling into the global matrix.
+///
+/// `mass` is the total mass that should flow through this subproblem (from the
+/// coarse coupling). The local plan is normalized to sum=1 internally, then
+/// scaled by `mass` when written to the output.
+fn solve_local_subproblem(
+    a: &[f32],
+    b: &[f32],
+    cost: &[f32],
+    full_m: usize,
+    src_idx: &[usize],
+    tgt_idx: &[usize],
+    reg: f32,
+    max_iter: usize,
+    tol: f32,
+    mass: f32,
+    coupling: &mut [f32],
+) {
+    let local_n = src_idx.len();
+    let local_m = tgt_idx.len();
+
+    // Build local marginals (relative weights within this group).
+    let local_a: Vec<f32> = src_idx.iter().map(|&i| a[i]).collect();
+    let local_b: Vec<f32> = tgt_idx.iter().map(|&j| b[j]).collect();
+
+    let a_sum: f32 = local_a.iter().sum();
+    let b_sum: f32 = local_b.iter().sum();
+    if a_sum <= 0.0 || b_sum <= 0.0 {
+        return;
+    }
+
+    let a_local: Array1<f32> = Array1::from_vec(local_a.iter().map(|&x| x / a_sum).collect());
+    let b_local: Array1<f32> = Array1::from_vec(local_b.iter().map(|&x| x / b_sum).collect());
+
+    let mut local_cost = Array2::zeros((local_n, local_m));
+    for (li, &gi) in src_idx.iter().enumerate() {
+        for (lj, &gj) in tgt_idx.iter().enumerate() {
+            local_cost[[li, lj]] = cost[gi * full_m + gj];
+        }
+    }
+
+    let (plan, _, _) =
+        sinkhorn_log_with_convergence(&a_local, &b_local, &local_cost, reg, max_iter, tol)
+            .unwrap_or_else(|_| {
+                let (plan, dist) = sinkhorn_log(&a_local, &b_local, &local_cost, reg, max_iter);
+                (plan, dist, max_iter)
+            });
+
+    // plan sums to ~1.0; scale by mass assigned by the coarse coupling.
+    for (li, &gi) in src_idx.iter().enumerate() {
+        for (lj, &gj) in tgt_idx.iter().enumerate() {
+            coupling[gi * full_m + gj] += plan[[li, lj]] * mass;
+        }
+    }
+}
+
+/// Recursive hierarchical solve.
+///
+/// `mass` is the total mass this subproblem must transport (from the parent's
+/// coarse coupling). At the top level this is 1.0.
+fn hierarchical_recurse(
+    a: &[f32],
+    b: &[f32],
+    cost: &[f32],
+    full_n: usize,
+    full_m: usize,
+    src_idx: &[usize],
+    tgt_idx: &[usize],
+    reg: f32,
+    branching: usize,
+    depth: usize,
+    max_iter: usize,
+    tol: f32,
+    mass: f32,
+    coupling: &mut [f32],
+) -> Result<()> {
+    let local_n = src_idx.len();
+    let local_m = tgt_idx.len();
+
+    // Base case: small enough or depth exhausted, solve directly.
+    if depth == 0 || local_n <= branching || local_m <= branching {
+        solve_local_subproblem(
+            a, b, cost, full_m, src_idx, tgt_idx, reg, max_iter, tol, mass, coupling,
+        );
+        return Ok(());
+    }
+
+    // --- Coarse step: partition and solve a small OT problem ---
+
+    let src_groups = partition_by_cost_projection(
+        |i| {
+            let mut s = 0.0f32;
+            for &j in tgt_idx {
+                s += cost[i * full_m + j];
+            }
+            s / local_m as f32
+        },
+        src_idx,
+        branching.min(local_n),
+    );
+
+    let tgt_groups = partition_by_cost_projection(
+        |j| {
+            let mut s = 0.0f32;
+            for &i in src_idx {
+                s += cost[i * full_m + j];
+            }
+            s / local_n as f32
+        },
+        tgt_idx,
+        branching.min(local_m),
+    );
+
+    let k_src = src_groups.len();
+    let k_tgt = tgt_groups.len();
+
+    // Coarse marginals: mass in each group (relative to this subproblem).
+    let coarse_a: Vec<f32> = src_groups
+        .iter()
+        .map(|g| g.iter().map(|&i| a[i]).sum::<f32>())
+        .collect();
+    let coarse_b: Vec<f32> = tgt_groups
+        .iter()
+        .map(|g| g.iter().map(|&j| b[j]).sum::<f32>())
+        .collect();
+
+    let coarse_a_sum: f32 = coarse_a.iter().sum();
+    let coarse_b_sum: f32 = coarse_b.iter().sum();
+    if coarse_a_sum <= 0.0 || coarse_b_sum <= 0.0 {
+        return Ok(());
+    }
+
+    let coarse_a_norm: Array1<f32> =
+        Array1::from_vec(coarse_a.iter().map(|&x| x / coarse_a_sum).collect());
+    let coarse_b_norm: Array1<f32> =
+        Array1::from_vec(coarse_b.iter().map(|&x| x / coarse_b_sum).collect());
+
+    // Coarse cost: average pairwise cost between groups.
+    let mut coarse_cost = Array2::zeros((k_src, k_tgt));
+    for (si, sg) in src_groups.iter().enumerate() {
+        for (ti, tg) in tgt_groups.iter().enumerate() {
+            coarse_cost[[si, ti]] = group_cost(sg, tg, cost, full_m);
+        }
+    }
+
+    // Solve coarse problem (plan sums to ~1.0).
+    let (coarse_plan, _, _) = sinkhorn_log_with_convergence(
+        &coarse_a_norm,
+        &coarse_b_norm,
+        &coarse_cost,
+        reg,
+        max_iter,
+        tol,
+    )
+    .unwrap_or_else(|_| {
+        let (plan, dist) =
+            sinkhorn_log(&coarse_a_norm, &coarse_b_norm, &coarse_cost, reg, max_iter);
+        (plan, dist, max_iter)
+    });
+
+    // --- Refine: for each pair with nonzero coarse coupling, recurse ---
+    let coarse_threshold = 1e-8;
+    for (si, sg) in src_groups.iter().enumerate() {
+        for (ti, tg) in tgt_groups.iter().enumerate() {
+            let w = coarse_plan[[si, ti]];
+            if w < coarse_threshold {
+                continue;
+            }
+            // The coarse plan entry w is the fraction of the coarse problem's
+            // mass flowing between these groups. Scale by `mass` to get the
+            // absolute mass for this subproblem.
+            hierarchical_recurse(
+                a,
+                b,
+                cost,
+                full_n,
+                full_m,
+                sg,
+                tg,
+                reg,
+                branching,
+                depth - 1,
+                max_iter,
+                tol,
+                mass * w,
+                coupling,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2638,5 +2979,173 @@ mod tests {
         for (idx, &val) in dense.iter().enumerate() {
             assert!(val >= -1e-7, "dense[{}] = {} is negative", idx, val);
         }
+    }
+
+    // --- Hierarchical OT tests ---
+
+    #[test]
+    fn hierarchical_cost_nonnegative() {
+        let n = 8;
+        let m = 8;
+        let a = vec![1.0 / n as f32; n];
+        let b = vec![1.0 / m as f32; m];
+        let cost = flat_cost(n, m);
+
+        let (tc, coupling) =
+            sinkhorn_hierarchical(&a, &b, &cost, n, m, 0.5, 4, 1, 200, 1e-5).unwrap();
+
+        assert!(tc >= 0.0, "transport cost should be nonneg, got {}", tc);
+        for (idx, &val) in coupling.iter().enumerate() {
+            assert!(val >= -1e-7, "coupling[{}] = {} is negative", idx, val);
+        }
+    }
+
+    #[test]
+    fn hierarchical_marginals_approx() {
+        let n = 6;
+        let m = 6;
+        let a = vec![1.0 / n as f32; n];
+        let b = vec![1.0 / m as f32; m];
+        let cost = flat_cost(n, m);
+
+        let (_, coupling) =
+            sinkhorn_hierarchical(&a, &b, &cost, n, m, 0.5, 3, 1, 200, 1e-5).unwrap();
+
+        // Row sums should approximate a.
+        for i in 0..n {
+            let row_sum: f32 = (0..m).map(|j| coupling[i * m + j]).sum();
+            assert!(
+                (row_sum - a[i]).abs() < 0.15,
+                "row {} sum = {}, expected ~{}",
+                i,
+                row_sum,
+                a[i]
+            );
+        }
+
+        // Column sums should approximate b.
+        for j in 0..m {
+            let col_sum: f32 = (0..n).map(|i| coupling[i * m + j]).sum();
+            assert!(
+                (col_sum - b[j]).abs() < 0.15,
+                "col {} sum = {}, expected ~{}",
+                j,
+                col_sum,
+                b[j]
+            );
+        }
+    }
+
+    #[test]
+    fn hierarchical_approx_quality() {
+        // Use a clustered distribution where hierarchical should approximate well.
+        // Two clusters: mass concentrated at indices 0-3 and 12-15.
+        let n = 16;
+        let m = 16;
+        let mut a_flat = vec![0.0f32; n];
+        let mut b_flat = vec![0.0f32; m];
+        // Source: mass in first cluster.
+        for i in 0..4 {
+            a_flat[i] = 0.25;
+        }
+        // Target: mass in second cluster.
+        for i in 12..16 {
+            b_flat[i] = 0.25;
+        }
+        let cost_flat = flat_cost(n, m);
+
+        let a_arr = Array1::from_vec(a_flat.clone());
+        let b_arr = Array1::from_vec(b_flat.clone());
+        let cost_arr = Array2::from_shape_vec((n, m), cost_flat.clone()).unwrap();
+
+        let (_, regular_cost) = sinkhorn_log(&a_arr, &b_arr, &cost_arr, 1.0, 200);
+
+        let (hier_cost, _) =
+            sinkhorn_hierarchical(&a_flat, &b_flat, &cost_flat, n, m, 1.0, 4, 1, 200, 1e-5)
+                .unwrap();
+
+        assert!(
+            hier_cost > 0.0,
+            "hierarchical cost should be positive, got {}",
+            hier_cost
+        );
+
+        // Both should find high cost (mass must move far). The hierarchical
+        // approximation should be in the same order of magnitude.
+        assert!(
+            regular_cost > 10.0,
+            "regular cost should be large for separated clusters, got {}",
+            regular_cost
+        );
+        let ratio = hier_cost / regular_cost;
+        assert!(
+            (0.1..20.0).contains(&ratio),
+            "hierarchical cost ({}) should be same order of magnitude as regular ({}), ratio={}",
+            hier_cost,
+            regular_cost,
+            ratio
+        );
+    }
+
+    #[test]
+    fn hierarchical_deeper_recursion() {
+        // max_depth > 1 should still produce valid output.
+        let n = 16;
+        let m = 16;
+        let a = vec![1.0 / n as f32; n];
+        let b = vec![1.0 / m as f32; m];
+        let cost = flat_cost(n, m);
+
+        let (tc, coupling) =
+            sinkhorn_hierarchical(&a, &b, &cost, n, m, 0.5, 4, 2, 200, 1e-5).unwrap();
+
+        assert!(tc >= 0.0, "transport cost nonneg, got {}", tc);
+        let total_mass: f32 = coupling.iter().sum();
+        assert!(
+            total_mass > 0.0,
+            "total coupling mass should be positive, got {}",
+            total_mass
+        );
+    }
+
+    #[test]
+    fn hierarchical_invalid_inputs() {
+        let a = vec![0.5, 0.5];
+        let b = vec![0.5, 0.5];
+        let cost = vec![0.0, 1.0, 1.0, 0.0];
+
+        // branching < 2
+        assert!(sinkhorn_hierarchical(&a, &b, &cost, 2, 2, 0.1, 1, 1, 100, 1e-5).is_err());
+
+        // branching > min(n,m)
+        assert!(sinkhorn_hierarchical(&a, &b, &cost, 2, 2, 0.1, 3, 1, 100, 1e-5).is_err());
+
+        // negative reg
+        assert!(sinkhorn_hierarchical(&a, &b, &cost, 2, 2, -0.1, 2, 1, 100, 1e-5).is_err());
+
+        // wrong cost size
+        assert!(sinkhorn_hierarchical(&a, &b, &[0.0, 1.0], 2, 2, 0.1, 2, 1, 100, 1e-5).is_err());
+    }
+
+    #[test]
+    fn hierarchical_timing_large() {
+        // Smoke test on a larger problem. No assertion on speed, just that it completes.
+        let n = 64;
+        let m = 64;
+        let a = vec![1.0 / n as f32; n];
+        let b = vec![1.0 / m as f32; m];
+        let cost = flat_cost(n, m);
+
+        let start = std::time::Instant::now();
+        let (tc, _) = sinkhorn_hierarchical(&a, &b, &cost, n, m, 1.0, 8, 2, 100, 1e-4).unwrap();
+        let hier_elapsed = start.elapsed();
+
+        assert!(tc >= 0.0);
+
+        // Just print timing for manual inspection, no assertion.
+        eprintln!(
+            "hierarchical 64x64 branching=8 depth=2: cost={:.4}, time={:?}",
+            tc, hier_elapsed
+        );
     }
 }
