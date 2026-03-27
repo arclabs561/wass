@@ -18,6 +18,9 @@
 //! $$
 //! W_2^2 = (\mu_1 - \mu_2)^2 + (\sigma_1 - \sigma_2)^2
 //! $$
+//!
+//! # Related crates
+//! - [`qig`]: Bures distance on density matrices. For centered Gaussians, W2 = Bures distance.
 
 use crate::{Error, Result};
 
