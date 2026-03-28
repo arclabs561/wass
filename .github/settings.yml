@@ -2,7 +2,7 @@
 # https://github.com/repository-settings/app
 
 repository:
-  description: "Optimal transport primitives: Wasserstein distance, Sinkhorn algorithm, and Sinkhorn divergences (balanced + unbalanced)."
+  description: "Optimal transport distances"
   homepage: "https://docs.rs/wass"
   private: false
   has_issues: true
