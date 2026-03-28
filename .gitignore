@@ -2,3 +2,8 @@
 Cargo.lock
 proptest-regressions/
 .DS_Store
+
+# AI editor configs (machine-local)
+.cursor/
+.cursorrules
+.cursorignore
