@@ -20,20 +20,32 @@ fn main() {
 
     // Graph 1: ring (cycle) -- 6 nodes, each with degree 2.
     let g1_adj = vec![
-        vec![1, 5], vec![0, 2], vec![1, 3],
-        vec![2, 4], vec![3, 5], vec![4, 0],
+        vec![1, 5],
+        vec![0, 2],
+        vec![1, 3],
+        vec![2, 4],
+        vec![3, 5],
+        vec![4, 0],
     ];
 
     // Graph 2: star -- node 0 connected to all others.
     let g2_adj = vec![
-        vec![1, 2, 3, 4, 5], vec![0], vec![0],
-        vec![0], vec![0], vec![0],
+        vec![1, 2, 3, 4, 5],
+        vec![0],
+        vec![0],
+        vec![0],
+        vec![0],
+        vec![0],
     ];
 
     // Graph 3: two triangles connected by an edge (barbell).
     let g3_adj = vec![
-        vec![1, 2], vec![0, 2], vec![0, 1, 3],
-        vec![2, 4, 5], vec![3, 5], vec![3, 4],
+        vec![1, 2],
+        vec![0, 2],
+        vec![0, 1, 3],
+        vec![2, 4, 5],
+        vec![3, 5],
+        vec![3, 4],
     ];
 
     // Extract node features for each graph as Array2 (n x d).
@@ -123,7 +135,8 @@ fn extract_features(adj: &[Vec<usize>]) -> Array2<f32> {
 
         // Average neighbor degree.
         if k > 0 {
-            let avg_nd: f32 = neighbors.iter().map(|&j| adj[j].len() as f32).sum::<f32>() / k as f32;
+            let avg_nd: f32 =
+                neighbors.iter().map(|&j| adj[j].len() as f32).sum::<f32>() / k as f32;
             features[[i, 2]] = avg_nd;
         }
     }
