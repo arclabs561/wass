@@ -11,6 +11,8 @@ documentation = "https://docs.rs/wass"
 keywords = ["optimal-transport", "wasserstein", "sinkhorn", "divergence"]
 categories = ["algorithms", "science", "mathematics"]
 
+[workspace]
+
 [dependencies]
 thiserror = "2.0"
 ndarray = "0.16"
