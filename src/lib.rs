@@ -787,7 +787,7 @@ pub fn sinkhorn_log_with_convergence(
     let mut g: Array1<f32> = Array1::zeros(n);
 
     // Check marginals every so often; doing it every iteration is O(mn) overhead.
-    let check_every = 10usize.max(1);
+    let check_every = 10usize;
 
     for iter in 0..max_iter {
         for i in 0..m {
@@ -901,7 +901,7 @@ pub fn unbalanced_sinkhorn_log_with_convergence(
     let mut log_v: Array1<f32> = Array1::zeros(n);
 
     // Check convergence by dual drift (fixed-point residual).
-    let check_every = 10usize.max(1);
+    let check_every = 10usize;
 
     for iter in 0..max_iter {
         // log(Kv)_i = logsumexp_j (logK_ij + log_v[j]), with logK_ij = -C_ij/reg.
@@ -1114,7 +1114,7 @@ pub fn unbalanced_sinkhorn_divergence_same_support(
     let mut f_aa = damping * softmin_xy(eps, cost, &a_log);
     let mut g_bb = damping * softmin_xy(eps, cost, &b_log);
 
-    let check_every = 10usize.max(1);
+    let check_every = 10usize;
     for iter in 0..max_iter {
         let h_b = &b_log + &(g_ab.mapv(|x| x / eps));
         let h_a = &a_log + &(f_ba.mapv(|x| x / eps));
@@ -1282,7 +1282,7 @@ pub fn unbalanced_sinkhorn_divergence_general(
     let mut f_aa = damping * softmin_rows(eps, cost_aa, &a_log);
     let mut g_bb = damping * softmin_cols(eps, cost_bb, &b_log); // cost_bb is square symmetric usually, but treat generically
 
-    let check_every = 10usize.max(1);
+    let check_every = 10usize;
     for iter in 0..max_iter {
         // Update potentials for (a,b)
         let h_b = &b_log + &(g_ab.mapv(|x| x / eps));
@@ -2793,12 +2793,12 @@ mod tests {
         let n = 6;
         let m = 4;
         let a: Vec<f32> = {
-            let raw = vec![1.0, 2.0, 3.0, 2.0, 1.0, 1.0];
+            let raw = [1.0, 2.0, 3.0, 2.0, 1.0, 1.0];
             let s: f32 = raw.iter().sum();
             raw.iter().map(|&x| x / s).collect()
         };
         let b: Vec<f32> = {
-            let raw = vec![2.0, 1.0, 1.0, 2.0];
+            let raw = [2.0, 1.0, 1.0, 2.0];
             let s: f32 = raw.iter().sum();
             raw.iter().map(|&x| x / s).collect()
         };
@@ -2824,12 +2824,12 @@ mod tests {
         let n = 6;
         let m = 4;
         let a: Vec<f32> = {
-            let raw = vec![1.0, 2.0, 3.0, 2.0, 1.0, 1.0];
+            let raw = [1.0, 2.0, 3.0, 2.0, 1.0, 1.0];
             let s: f32 = raw.iter().sum();
             raw.iter().map(|&x| x / s).collect()
         };
         let b: Vec<f32> = {
-            let raw = vec![2.0, 1.0, 1.0, 2.0];
+            let raw = [2.0, 1.0, 1.0, 2.0];
             let s: f32 = raw.iter().sum();
             raw.iter().map(|&x| x / s).collect()
         };
@@ -2913,12 +2913,12 @@ mod tests {
         let n = 5;
         let m = 4;
         let a: Vec<f32> = {
-            let raw = vec![1.0, 2.0, 1.0, 2.0, 1.0];
+            let raw = [1.0, 2.0, 1.0, 2.0, 1.0];
             let s: f32 = raw.iter().sum();
             raw.iter().map(|&x| x / s).collect()
         };
         let b: Vec<f32> = {
-            let raw = vec![1.0, 1.0, 1.0, 1.0];
+            let raw = [1.0, 1.0, 1.0, 1.0];
             let s: f32 = raw.iter().sum();
             raw.iter().map(|&x| x / s).collect()
         };

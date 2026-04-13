@@ -60,8 +60,8 @@ fn build_codebook(
     for doc in documents {
         for word in doc.split_whitespace() {
             let w = word.to_lowercase();
-            if !word_to_id.contains_key(&w) {
-                word_to_id.insert(w, next_id);
+            if let std::collections::hash_map::Entry::Vacant(e) = word_to_id.entry(w) {
+                e.insert(next_id);
                 next_id += 1;
             }
         }
