@@ -547,6 +547,7 @@ pub fn sinkhorn_divergence_same_support(
 /// - `cost_ab` for X×Y
 /// - `cost_aa` for X×X
 /// - `cost_bb` for Y×Y
+#[allow(clippy::too_many_arguments)]
 pub fn sinkhorn_divergence_general(
     a: &Array1<f32>,
     b: &Array1<f32>,
@@ -854,11 +855,12 @@ pub fn sinkhorn_log_with_convergence(
 ///
 /// The returned `objective` matches this scaling formulation:
 /// \[
-/// \min_{P\ge 0}\; \langle P, C \rangle
-/// + \varepsilon\,\mathrm{KL}(P\,\|\,K)
-/// + \rho\,\mathrm{KL}(P\mathbf{1}\,\|\,a)
-/// + \rho\,\mathrm{KL}(P^\top\mathbf{1}\,\|\,b),
-/// \quad K_{ij}=\exp(-C_{ij}/\varepsilon).
+///   \min_{P\ge 0}\; \langle P, C \rangle
+///   + \varepsilon\,\mathrm{KL}(P\,\|\,K)
+///   + \rho\,\mathrm{KL}(P\mathbf{1}\,\|\,a)
+///   + \rho\,\mathrm{KL}(P^\top\mathbf{1}\,\|\,b),
+///     \quad K_{ij}=\exp(-C_{ij}/\varepsilon).
+///
 /// \]
 pub fn unbalanced_sinkhorn_log_with_convergence(
     a: &Array1<f32>,
@@ -1187,6 +1189,7 @@ pub fn unbalanced_sinkhorn_divergence_same_support(
 ///
 /// Computes the debiased divergence:
 /// S(a,b) = OT(a,b) - 0.5*OT(a,a) - 0.5*OT(b,b) + 0.5*ε*(m(a)-m(b))²
+#[allow(clippy::too_many_arguments)]
 pub fn unbalanced_sinkhorn_divergence_general(
     a: &Array1<f32>,
     b: &Array1<f32>,
@@ -1402,6 +1405,7 @@ impl LowRankCoupling {
     ///
     /// `v` must have length `m`. Returns a vector of length `n`.
     /// Cost: `O((n + m) * rank)` instead of `O(n * m)`.
+    #[allow(clippy::needless_range_loop)]
     pub fn apply(&self, v: &[f32]) -> Vec<f32> {
         assert_eq!(v.len(), self.m, "v must have length m={}", self.m);
 
@@ -1436,6 +1440,7 @@ impl LowRankCoupling {
     }
 
     /// Column marginals of the coupling (length m).
+    #[allow(clippy::needless_range_loop)]
     pub fn col_marginals(&self) -> Vec<f32> {
         // P^T 1_n = R diag(g) Q^T 1_n
         // Step 1: s = Q^T 1_n
@@ -1988,6 +1993,7 @@ pub fn max_sliced_wasserstein(
 ///
 /// Halmos, Gold, Liu, Raphael (2025). "Hierarchical Refinement: Optimal
 /// Transport to Infinity and Beyond."
+#[allow(clippy::too_many_arguments)]
 pub fn sinkhorn_hierarchical(
     a: &[f32],
     b: &[f32],
@@ -2097,6 +2103,7 @@ fn group_cost(src_group: &[usize], tgt_group: &[usize], cost: &[f32], m_cols: us
 /// `mass` is the total mass that should flow through this subproblem (from the
 /// coarse coupling). The local plan is normalized to sum=1 internally, then
 /// scaled by `mass` when written to the output.
+#[allow(clippy::too_many_arguments)]
 fn solve_local_subproblem(
     a: &[f32],
     b: &[f32],
@@ -2152,6 +2159,7 @@ fn solve_local_subproblem(
 ///
 /// `mass` is the total mass this subproblem must transport (from the parent's
 /// coarse coupling). At the top level this is 1.0.
+#[allow(clippy::too_many_arguments, clippy::only_used_in_recursion)]
 fn hierarchical_recurse(
     a: &[f32],
     b: &[f32],
@@ -3045,12 +3053,12 @@ mod tests {
         let mut a_flat = vec![0.0f32; n];
         let mut b_flat = vec![0.0f32; m];
         // Source: mass in first cluster.
-        for i in 0..4 {
-            a_flat[i] = 0.25;
+        for val in a_flat.iter_mut().take(4) {
+            *val = 0.25;
         }
         // Target: mass in second cluster.
-        for i in 12..16 {
-            b_flat[i] = 0.25;
+        for val in b_flat.iter_mut().skip(12).take(4) {
+            *val = 0.25;
         }
         let cost_flat = flat_cost(n, m);
 
