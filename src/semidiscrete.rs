@@ -98,7 +98,7 @@ pub fn fit_potentials_sgd_neg_dot(
     if bs <= 0.0 {
         return Err(Error::Domain("b must have positive total mass"));
     }
-    if !(cfg.lr > 0.0) || !cfg.lr.is_finite() {
+    if cfg.lr.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) || !cfg.lr.is_finite() {
         return Err(Error::Domain("lr must be positive and finite"));
     }
     if cfg.steps == 0 || cfg.batch_size == 0 {
@@ -154,9 +154,9 @@ pub fn fit_potentials_sgd_neg_dot(
                     tmp[j] = v;
                 }
                 let mut s = 0.0f64;
-                for j in 0..n {
-                    let w = (tmp[j] - maxv).exp();
-                    tmp[j] = w;
+                for val in tmp.iter_mut().take(n) {
+                    let w = (*val - maxv).exp();
+                    *val = w;
                     s += w as f64;
                 }
                 if s > 0.0 {

@@ -5,9 +5,10 @@
 //!
 //! $$
 //! W_2^2(\mathcal{N}(\mu_1, \Sigma_1), \mathcal{N}(\mu_2, \Sigma_2))
-//! = \|\mu_1 - \mu_2\|^2
-//! + \mathrm{tr}(\Sigma_1) + \mathrm{tr}(\Sigma_2)
-//! - 2\,\mathrm{tr}\!\bigl((\Sigma_1^{1/2}\,\Sigma_2\,\Sigma_1^{1/2})^{1/2}\bigr)
+//!   = \|\mu_1 - \mu_2\|^2
+//!   + \mathrm{tr}(\Sigma_1) + \mathrm{tr}(\Sigma_2)
+//!   - 2\,\mathrm{tr}\!\bigl((\Sigma_1^{1/2}\,\Sigma_2\,\Sigma_1^{1/2})^{1/2}\bigr)
+//!
 //! $$
 //!
 //! For diagonal covariances `diag(s)`, the matrix square root simplifies to

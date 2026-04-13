@@ -153,8 +153,8 @@ fn build_codebook(
     for group in domain_groups {
         // Shared direction for this domain.
         let mut domain_vec = vec![0.0f32; dim];
-        for d in 0..dim {
-            domain_vec[d] = rng.random_range(-0.5f32..0.5f32);
+        for val in domain_vec.iter_mut() {
+            *val = rng.random_range(-0.5f32..0.5f32);
         }
         for &word in *group {
             if let Some(&id) = word_to_id.get(word) {
