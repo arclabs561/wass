@@ -23,7 +23,7 @@ innr = { version = "0.2", optional = true }
 
 [dev-dependencies]
 proptest = "1.5"
-clump = "0.4"
+clump = "0.5"
 symproj = "0.1"
 slabs = "0.1"
 

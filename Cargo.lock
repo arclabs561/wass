@@ -46,9 +46,9 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "clump"
-version = "0.4.2"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0e1cf1aa1b2e2f0c0f251e142ef00a06e74d3e3fc0231e89bea68fa4d1c3381"
+checksum = "d0bb3e9ba4809dc0dfd816cb8a6181d96b09aacf7bbc368558a21387f1c382f9"
 dependencies = [
  "rand",
  "thiserror",
@@ -90,9 +90,9 @@ dependencies = [
 
 [[package]]
 name = "innr"
-version = "0.1.9"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f75d0b29074c87add080dab7566c3a11854cd90a315af73fa5537b4643234142"
+checksum = "761791b2bc31ea3295c68c48bf1378402684ebcf47202c65f3226ef7affb8bc3"
 
 [[package]]
 name = "libc"
