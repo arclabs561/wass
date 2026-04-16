@@ -1,5 +1,9 @@
 //! Flow / drift primitives.
 //!
+//! **Deprecated**: these items have moved to [`flowmatch::flow`]. The re-exports
+//! in `wass` (`wass::VectorField`, `wass::flow_drift`) are kept for compatibility
+//! but will be removed in a future version.
+//!
 //! In this stack, we treat "drift" as **infinitesimal transport**:
 //! a vector field describes the local velocity needed to move mass/points.
 //!
@@ -14,6 +18,9 @@
 use ndarray::{Array1, ArrayView1};
 
 /// A vector field representing a continuous drift in a (latent) space.
+///
+/// **Deprecated**: use `flowmatch::VectorField` instead.
+#[deprecated(note = "moved to flowmatch::VectorField")]
 pub trait VectorField {
     /// Evaluate the velocity at point `x` and time `t`.
     fn velocity(&self, x: &ArrayView1<f64>, t: f64) -> Array1<f64>;
@@ -21,11 +28,14 @@ pub trait VectorField {
 
 /// Computes the drift between two points.
 ///
+/// **Deprecated**: use `flowmatch::flow_drift` instead.
+///
 /// \[
 /// v = \frac{\text{target} - \text{source}}{\Delta t}
 /// \]
 ///
 /// Panics if `source.len() != target.len()` or if `dt == 0`.
+#[deprecated(note = "moved to flowmatch::flow_drift")]
 pub fn flow_drift(source: &[f64], target: &[f64], dt: f64) -> Vec<f64> {
     assert_eq!(source.len(), target.len(), "dimension mismatch");
     assert!(dt != 0.0, "dt must be non-zero");
@@ -37,6 +47,7 @@ pub fn flow_drift(source: &[f64], target: &[f64], dt: f64) -> Vec<f64> {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 
