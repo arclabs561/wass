@@ -26,6 +26,11 @@ proptest = "1.5"
 clump = "0.5"
 symproj = "0.1"
 slabs = "0.1"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "sinkhorn_bench"
+harness = false
 
 [features]
 default = []
