@@ -88,6 +88,7 @@
 use ndarray::{Array1, Array2};
 use thiserror::Error;
 
+#[allow(deprecated)]
 pub mod flow;
 pub mod gaussian;
 pub mod gromov;
