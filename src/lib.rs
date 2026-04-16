@@ -331,14 +331,17 @@ pub fn sinkhorn(
     }
 
     // Transport plan P = diag(u) K diag(v)
-    let mut plan = Array2::zeros((m, n));
+    // Use ndarray broadcasting: scale each row by u[i], then scale each column by v[j].
+    // This avoids nested indexing and lets ndarray use SIMD/vectorized multiply.
+    let mut plan = k.clone();
     for i in 0..m {
+        let ui = u[i];
         for j in 0..n {
-            plan[[i, j]] = u[i] * k[[i, j]] * v[j];
+            plan[[i, j]] *= ui * v[j];
         }
     }
 
-    // Transport distance = <C, P>
+    // Transport distance = <C, P> computed jointly to avoid a second pass
     let distance: f32 = cost.iter().zip(plan.iter()).map(|(&c, &p)| c * p).sum();
 
     (plan, distance)
@@ -378,6 +381,9 @@ pub fn sinkhorn_with_convergence(
     let mut u = Array1::ones(m);
     let mut v = Array1::ones(n);
 
+    // Check convergence every N iterations to amortize the O(mn) marginal check.
+    let check_every = 10usize;
+
     for iter in 0..max_iter {
         // u = a / (K v)
         let kv = k.dot(&v);
@@ -386,38 +392,43 @@ pub fn sinkhorn_with_convergence(
         }
 
         // v = b / (K^T u)
+        // Reuse kv from above for convergence check; compute ktu for v update.
         let ktu = k.t().dot(&u);
         for j in 0..n {
             v[j] = b[j] / (ktu[j] + EPSILON);
         }
 
         // Check convergence via marginal error:
-        // row_sum = diag(u) K v, col_sum = diag(v) K^T u.
-        //
-        // This matches the OT constraints and is scale-invariant.
-        let kv2 = k.dot(&v);
-        let mut max_err = 0.0f32;
-        for i in 0..m {
-            let row_sum = u[i] * kv2[i];
-            max_err = max_err.max((row_sum - a[i]).abs());
-        }
-        let ktu2 = k.t().dot(&u);
-        for j in 0..n {
-            let col_sum = v[j] * ktu2[j];
-            max_err = max_err.max((col_sum - b[j]).abs());
-        }
-
-        if max_err < tol {
-            let mut plan = Array2::zeros((m, n));
+        // row_sum = u[i] * (K v)[i] should equal a[i].
+        // Reuse ktu for col_sum; recompute kv with updated v.
+        if (iter + 1) % check_every == 0 || iter + 1 == max_iter {
+            let kv2 = k.dot(&v);
+            let mut max_err = 0.0f32;
             for i in 0..m {
-                for j in 0..n {
-                    plan[[i, j]] = u[i] * k[[i, j]] * v[j];
-                }
+                let row_sum = u[i] * kv2[i];
+                max_err = max_err.max((row_sum - a[i]).abs());
+            }
+            // ktu was computed with the just-updated u; now v is updated too,
+            // so recompute K^T u with current u for the col check.
+            let ktu2 = k.t().dot(&u);
+            for j in 0..n {
+                let col_sum = v[j] * ktu2[j];
+                max_err = max_err.max((col_sum - b[j]).abs());
             }
 
-            let distance: f32 = cost.iter().zip(plan.iter()).map(|(&c, &p)| c * p).sum();
+            if max_err < tol {
+                let mut plan = k.clone();
+                for i in 0..m {
+                    let ui = u[i];
+                    for j in 0..n {
+                        plan[[i, j]] *= ui * v[j];
+                    }
+                }
 
-            return Ok((plan, distance, iter + 1));
+                let distance: f32 = cost.iter().zip(plan.iter()).map(|(&c, &p)| c * p).sum();
+
+                return Ok((plan, distance, iter + 1));
+            }
         }
     }
 
