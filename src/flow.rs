@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Flow / drift primitives.
 //!
 //! **Deprecated**: these items have moved to [`flowmatch::flow`]. The re-exports
