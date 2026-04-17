@@ -65,7 +65,7 @@ cargo run --example sparse_vs_sinkhorn
 
 ```toml
 [dependencies]
-wass = "0.1.5"
+wass = "0.1"
 ```
 
 ```rust
