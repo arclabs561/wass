@@ -4,7 +4,7 @@
 [![Documentation](https://docs.rs/wass/badge.svg)](https://docs.rs/wass)
 [![CI](https://github.com/arclabs561/wass/actions/workflows/ci.yml/badge.svg)](https://github.com/arclabs561/wass/actions/workflows/ci.yml)
 
-Optimal transport in Rust: exact Wasserstein distance, the Sinkhorn
+Optimal transport: exact Wasserstein distance, the Sinkhorn
 algorithm with epsilon scheduling, and Sinkhorn divergence.
 
 ## Problem
