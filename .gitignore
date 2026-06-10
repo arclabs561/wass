@@ -7,3 +7,6 @@ proptest-regressions/
 .cursor/
 .cursorrules
 .cursorignore
+
+# cargo-semver-checks-action scratch dir (publish workflow)
+/semver-checks/
