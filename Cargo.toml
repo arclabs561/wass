@@ -19,7 +19,7 @@ ndarray = "0.16"
 rand = "0.9"
 rand_chacha = "0.9"
 rand_distr = "0.5"
-innr = { version = "0.2", optional = true }
+innr = { version = "0.4", optional = true }
 
 [dev-dependencies]
 proptest = "1.5"
