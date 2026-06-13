@@ -88,10 +88,10 @@
 use ndarray::{Array1, Array2};
 use thiserror::Error;
 
+pub mod barycenter;
 pub mod flow;
 pub mod gaussian;
 pub mod gromov;
-pub mod barycenter;
 pub mod semidiscrete;
 pub mod sparse;
 pub mod wfr;
