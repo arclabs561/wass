@@ -11,6 +11,7 @@
 | Handle outliers or mass mismatch          | `unbalanced_outlier_tradeoff`, `unbalanced_sinkhorn_mass_mismatch` |
 | Transfer a color palette via OT           | `color_transfer`                                                 |
 | Register (align) two 2D point clouds     | `point_cloud_registration`                                       |
+| Average / morph distributions (barycenter) | `barycenter_morph`                                             |
 
 ## Example descriptions
 
@@ -31,6 +32,8 @@
 - **`color_transfer`** -- Computes an OT plan between two small color palettes (warm and cool RGB triplets) using Sinkhorn, then applies the plan to map one palette onto the other. A minimal version of the classic color-transfer application.
 
 - **`point_cloud_registration`** -- Registers two 2D point clouds (source circle vs. rotated/translated/noisy copy) via Sinkhorn OT. Applies barycentric mapping from the transport plan and reports mean/max nearest-neighbor registration error.
+
+- **`barycenter_morph`** -- Renders both barycenter modes in the terminal: the free-support barycenter morphing a square into a circle as the mixing weight sweeps, and the fixed-support barycenter of two 1D humps landing as a single hump between them (where the naive pointwise average keeps both). Shows why the OT average is not the pointwise average.
 
 ## Running
 

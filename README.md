@@ -47,6 +47,12 @@ cargo run --example gromov_wasserstein_graph_match
 cargo run --example sparse_vs_sinkhorn
 ```
 
+**Barycenters (the OT "average")**. The Wasserstein barycenter is not the pointwise average: it moves mass along the geometry. The example morphs a square into a circle with the free-support barycenter, and shows the fixed-support barycenter of two humps landing as one hump between them (where the naive average keeps both):
+
+```bash
+cargo run --example barycenter_morph
+```
+
 ## What it provides
 
 | Function | What it does |
@@ -61,12 +67,14 @@ cargo run --example sparse_vs_sinkhorn
 | `gromov::gromov_wasserstein` | Structure-preserving matching across metric spaces |
 | `semidiscrete::fit_potentials_sgd_neg_dot` | Semidiscrete OT via SGD on dual potentials |
 | `sparse::solve_semidual_l2` | L2-regularized sparse transport plans |
+| `barycenter::barycenter` | Fixed-support entropic Wasserstein barycenter (log-domain IBP) |
+| `barycenter::free_support_barycenter` | Free-support barycenter (support points move; shape interpolation) |
 
 ## Usage
 
 ```toml
 [dependencies]
-wass = "0.1"
+wass = "0.2"
 ```
 
 ```rust
