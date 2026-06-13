@@ -5,7 +5,9 @@
 //!
 //! This example shows:
 //! 1. Two isomorphic graphs with permuted node labels
-//! 2. GW recovers the correct alignment (transport plan concentrates on the permutation)
+//! 2. GW recovers the alignment up to graph automorphism (the transport plan
+//!    concentrates on the permutation when the graph is asymmetric; a symmetric
+//!    graph is only recoverable up to its symmetry, see the note in Part 1)
 //! 3. Non-isomorphic graphs produce diffuse plans (no perfect matching)
 //!
 //! The 4x4 graph size here is chosen for readability of the printed transport plan.
@@ -32,12 +34,19 @@ fn main() {
     println!("=== Gromov-Wasserstein Graph Matching ===\n");
 
     // --- Part 1: Isomorphic graphs (permuted labels) ---
-    // Graph A: path graph 0-1-2-3 (shortest-path distances)
+    // Graph A: a path 0-1-2-3 with UNEQUAL edge weights (1, 2, 4), so the
+    // shortest-path distance matrix below has no nontrivial automorphism. This
+    // matters: GW uses only internal distances, so it can recover an alignment
+    // only up to the graph's automorphisms. An UNWEIGHTED path 0-1-2-3 has a
+    // reflection symmetry (0<->3, 1<->2), and GW would split its plan 50/50
+    // between the true permutation and its mirror (recovering ~half the labels).
+    // Breaking the symmetry with distinct edge weights gives every node a unique
+    // distance profile, so GW recovers the full permutation.
     let c1 = array![
-        [0.0, 1.0, 2.0, 3.0],
-        [1.0, 0.0, 1.0, 2.0],
-        [2.0, 1.0, 0.0, 1.0],
-        [3.0, 2.0, 1.0, 0.0]
+        [0.0, 1.0, 3.0, 7.0],
+        [1.0, 0.0, 2.0, 6.0],
+        [3.0, 2.0, 0.0, 4.0],
+        [7.0, 6.0, 4.0, 0.0]
     ];
 
     // Graph B: same path graph but with nodes permuted as [2,0,3,1]
