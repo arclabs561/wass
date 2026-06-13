@@ -58,7 +58,7 @@ cargo run --example sparse_vs_sinkhorn
 | `euclidean_cost_matrix` | L2 cost matrix from point clouds |
 | `sq_euclidean_cost_matrix` | Squared L2 cost (correct for W2 OT-CFM) |
 | `sliced_wasserstein` | High-dimensional approximation via random projections |
-| `gromov_wasserstein` | Structure-preserving matching across metric spaces |
+| `gromov::gromov_wasserstein` | Structure-preserving matching across metric spaces |
 | `semidiscrete::fit_potentials_sgd_neg_dot` | Semidiscrete OT via SGD on dual potentials |
 | `sparse::solve_semidual_l2` | L2-regularized sparse transport plans |
 
