@@ -91,6 +91,7 @@ use thiserror::Error;
 pub mod flow;
 pub mod gaussian;
 pub mod gromov;
+pub mod barycenter;
 pub mod semidiscrete;
 pub mod sparse;
 pub mod wfr;
@@ -153,7 +154,7 @@ const EPSILON: f32 = 1e-7;
 ///
 /// Returns `-∞` if `len == 0`.
 #[inline]
-fn logsumexp_by(len: usize, mut f: impl FnMut(usize) -> f32) -> f32 {
+pub(crate) fn logsumexp_by(len: usize, mut f: impl FnMut(usize) -> f32) -> f32 {
     if len == 0 {
         return f32::NEG_INFINITY;
     }
