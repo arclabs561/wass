@@ -2,26 +2,33 @@
 
 ## Which example should I run?
 
-| I want to...                              | Example                                                          |
-|-------------------------------------------|------------------------------------------------------------------|
-| Compare two histograms on the same bins   | `sinkhorn_divergence_same_support`                               |
-| Align documents or noisy text             | `document_alignment_demo`, `noisy_ocr_matching`                  |
-| Match graphs without shared coordinates   | `gromov_wasserstein_graph_match`                                 |
-| Get sparse (hard-assignment) plans        | `sparse_vs_sinkhorn`                                             |
-| Handle outliers or mass mismatch          | `unbalanced_outlier_tradeoff`, `unbalanced_sinkhorn_mass_mismatch` |
-| Transfer a color palette via OT           | `color_transfer`                                                 |
-| Register (align) two 2D point clouds     | `point_cloud_registration`                                       |
-| Average / morph distributions (barycenter) | `barycenter_morph`                                             |
+| I want to...                                | Example                                                          |
+|---------------------------------------------|------------------------------------------------------------------|
+| Compare two histograms on the same bins     | `sinkhorn_divergence_same_support`                               |
+| Compare documents with word movers distance | `document_distance`                                              |
+| Align documents or noisy text               | `document_alignment_demo`, `noisy_ocr_matching`                  |
+| Match graphs without shared coordinates     | `gromov_wasserstein_graph_match`                                 |
+| Compare graphs as node-feature distributions | `graph_kernel`                                                  |
+| Get sparse (hard-assignment) plans          | `sparse_vs_sinkhorn`                                             |
+| Handle outliers or mass mismatch            | `unbalanced_outlier_tradeoff`, `unbalanced_sinkhorn_mass_mismatch` |
+| Transfer a color palette via OT             | `color_transfer`                                                 |
+| Register (align) two 2D point clouds        | `point_cloud_registration`                                       |
+| Compare clusters without collapsing shape   | `ot_clustering`                                                  |
+| Average / morph distributions (barycenter)  | `barycenter_morph`                                               |
 
 ## Example descriptions
 
 - **`sinkhorn_divergence_same_support`** -- Computes Sinkhorn divergence between two histograms on shared bins. Shows the difference between raw Sinkhorn cost and debiased divergence.
+
+- **`document_distance`** -- Computes Word Mover's Distance between short documents using token embeddings and Sinkhorn OT. Also compares sentence chunks, so the output shows token-level and chunk-level distance.
 
 - **`document_alignment_demo`** -- Aligns two noisy documents (different phrasing, boilerplate, OCR errors) using unbalanced OT with char n-gram embeddings and TF-IDF weights. See also: `noisy_ocr_matching`.
 
 - **`noisy_ocr_matching`** -- Aligns a clean reference string against a noisy OCR scan with headers/footers using unbalanced Sinkhorn. Focuses on the rho parameter's effect on outlier rejection. See also: `document_alignment_demo`.
 
 - **`gromov_wasserstein_graph_match`** -- Recovers node correspondences between isomorphic graphs using Gromov-Wasserstein distance (no shared coordinate system needed). Shows both isomorphic (permuted) and non-isomorphic (path vs star) cases.
+
+- **`graph_kernel`** -- Treats each graph as a distribution over node features, computes sliced Wasserstein distances, then converts them to an RBF kernel matrix. Shows a lightweight graph-comparison path without solving full Gromov-Wasserstein.
 
 - **`sparse_vs_sinkhorn`** -- Compares dense Sinkhorn plans (entropic regularization, all entries positive) against sparse OT plans (L2 regularization, exact zeros). Shows the effect of the regularization parameter on sparsity.
 
@@ -32,6 +39,8 @@
 - **`color_transfer`** -- Computes an OT plan between two small color palettes (warm and cool RGB triplets) using Sinkhorn, then applies the plan to map one palette onto the other. A minimal version of the classic color-transfer application.
 
 - **`point_cloud_registration`** -- Registers two 2D point clouds (source circle vs. rotated/translated/noisy copy) via Sinkhorn OT. Applies barycentric mapping from the transport plan and reports mean/max nearest-neighbor registration error.
+
+- **`ot_clustering`** -- Compares centroid distances with Sinkhorn divergences between fitted clusters. The point is that centroid distance only sees cluster centers, while Sinkhorn divergence also sees spread and shape.
 
 - **`barycenter_morph`** -- Renders both barycenter modes in the terminal: the free-support barycenter morphing a square into a circle as the mixing weight sweeps, and the fixed-support barycenter of two 1D humps landing as a single hump between them (where the naive pointwise average keeps both). Shows why the OT average is not the pointwise average.
 
