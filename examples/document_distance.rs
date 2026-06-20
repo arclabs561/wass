@@ -11,7 +11,7 @@
 //! 5. Sinkhorn regularized OT -> Word Mover's Distance
 //!
 //! Also demonstrates chunk-level comparison:
-//! - Split documents into sentence chunks (slabs)
+//! - Split documents into semantic chunks (text-splitter)
 //! - Mean-pool each chunk's embeddings into a single vector
 //! - Compute OT between chunk-level representations
 
@@ -20,8 +20,8 @@ use std::collections::HashMap;
 use ndarray::{Array1, Array2};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use slabs::{Chunker, SentenceChunker};
 use symproj::Codebook;
+use text_splitter::TextSplitter;
 use wass::sinkhorn_log;
 
 // --- Documents ---
@@ -246,7 +246,7 @@ fn mean_pool(embeddings: &[Vec<f32>], dim: usize) -> Vec<f32> {
 
 /// Compute chunk-level OT distance between two documents.
 ///
-/// Each document is split into sentence chunks (via slabs), each chunk is
+/// Each document is split into semantic chunks, each chunk is
 /// mean-pooled into a single vector, then Sinkhorn computes the transport
 /// cost between the two sets of chunk embeddings.
 fn chunk_level_distance(
@@ -257,10 +257,9 @@ fn chunk_level_distance(
     reg: f32,
     max_iter: usize,
 ) -> f32 {
-    let chunker = SentenceChunker::new(1);
-
-    let chunks_a = chunker.chunk(doc_a);
-    let chunks_b = chunker.chunk(doc_b);
+    let splitter = TextSplitter::new(90);
+    let chunks_a = splitter.chunks(doc_a).collect::<Vec<_>>();
+    let chunks_b = splitter.chunks(doc_b).collect::<Vec<_>>();
 
     if chunks_a.is_empty() || chunks_b.is_empty() {
         return f32::INFINITY;
@@ -270,8 +269,8 @@ fn chunk_level_distance(
 
     let chunk_embs_a: Vec<Vec<f32>> = chunks_a
         .iter()
-        .map(|slab| {
-            let ids = tokenize(&slab.text, word_to_id);
+        .map(|chunk| {
+            let ids = tokenize(chunk, word_to_id);
             let embs = codebook.encode_sequence_ids(&ids);
             mean_pool(&embs, dim)
         })
@@ -279,8 +278,8 @@ fn chunk_level_distance(
 
     let chunk_embs_b: Vec<Vec<f32>> = chunks_b
         .iter()
-        .map(|slab| {
-            let ids = tokenize(&slab.text, word_to_id);
+        .map(|chunk| {
+            let ids = tokenize(chunk, word_to_id);
             let embs = codebook.encode_sequence_ids(&ids);
             mean_pool(&embs, dim)
         })

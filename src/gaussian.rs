@@ -21,7 +21,7 @@
 //! $$
 //!
 //! # Related crates
-//! - [`qig`]: Bures distance on density matrices. For centered Gaussians, W2 = Bures distance.
+//! - `qig`: Bures distance on density matrices. For centered Gaussians, W2 = Bures distance.
 
 use crate::{Error, Result};
 

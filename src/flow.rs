@@ -1,11 +1,11 @@
 #![allow(deprecated)]
 //! Flow / drift primitives.
 //!
-//! **Deprecated**: these items have moved to [`flowmatch::flow`]. The re-exports
+//! **Deprecated**: these items have moved to `flowmatch::flow`. The re-exports
 //! in `wass` (`wass::VectorField`, `wass::flow_drift`) are kept for compatibility
 //! but will be removed in a future version.
 //!
-//! In this stack, we treat "drift" as **infinitesimal transport**:
+//! In this crate, we treat "drift" as **infinitesimal transport**:
 //! a vector field describes the local velocity needed to move mass/points.
 //!
 //! This module intentionally stays small and composable; higher-level training
