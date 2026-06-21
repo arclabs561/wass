@@ -529,6 +529,27 @@ pub fn sinkhorn_divergence(
 /// - Symmetric: \(S_\varepsilon(a, b) = S_\varepsilon(b, a)\)
 /// - Metrizes weak convergence for fixed \(\varepsilon > 0\)
 ///
+/// # Example
+///
+/// ```rust
+/// use wass::sinkhorn_divergence_same_support;
+/// use ndarray::{arr1, arr2};
+///
+/// let a = arr1(&[0.5_f32, 0.5]);
+/// let b = arr1(&[0.9_f32, 0.1]);
+/// let cost = arr2(&[[0.0_f32, 1.0], [1.0, 0.0]]);
+///
+/// // De-biased: zero self-divergence (Feydy et al. 2018), unlike the biased
+/// // entropic OT cost, which stays positive for S(a, a).
+/// let saa = sinkhorn_divergence_same_support(&a, &a, &cost, 1.0, 1000, 1e-5).unwrap();
+/// assert!(saa < 1e-5, "self-divergence should be ~0, got {saa}");
+///
+/// // Positive for distinct inputs, and symmetric.
+/// let sab = sinkhorn_divergence_same_support(&a, &b, &cost, 1.0, 1000, 1e-5).unwrap();
+/// let sba = sinkhorn_divergence_same_support(&b, &a, &cost, 1.0, 1000, 1e-5).unwrap();
+/// assert!(sab > 0.0 && (sab - sba).abs() < 1e-6);
+/// ```
+///
 /// Returns an error rather than silently producing a biased quantity.
 pub fn sinkhorn_divergence_same_support(
     a: &Array1<f32>,
