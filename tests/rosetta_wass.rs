@@ -14,9 +14,9 @@
 //! C/reg inside f32's representable range; without it, an early run showed
 //! plain f32 Sinkhorn diverging ~1% from POT because exp(-C/reg) underflowed to
 //! zero in f32 while staying nonzero in f64. Small reg with un-normalized cost
-//! is the regime wass::sinkhorn_log exists for, which is a separate (deferred)
-//! check. Also deferred: sinkhorn_divergence (its de-biasing convention needs a
-//! closer read before a POT mapping is safe).
+//! is the regime wass::sinkhorn_log exists for, now covered in the sibling file
+//! `rosetta_wass_sinkhorn_log.rs`. The de-biased Sinkhorn divergence
+//! (`sinkhorn_divergence_same_support`) is covered in `rosetta_wass_divergence.rs`.
 //!
 //! Regenerate the fixture: `uv run tests/fixtures/rosetta/gen_wass.py`.
 
