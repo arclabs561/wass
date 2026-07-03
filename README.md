@@ -99,7 +99,7 @@ let (plan, dist, iters) = sinkhorn_log_with_convergence(
 cargo test -p wass
 ```
 
-58 tests covering Sinkhorn convergence, transport plan marginal validity, divergence properties (symmetry, non-negativity, convexity, cost-shift invariance), unbalanced OT, Gromov-Wasserstein, sparse transport, semidiscrete OT, flow drift, and EMD.
+Tests cover Sinkhorn convergence, transport plan marginal validity, divergence properties (symmetry, non-negativity, convexity, cost-shift invariance), unbalanced OT, Gromov-Wasserstein, sparse transport, semidiscrete OT, flow drift, and EMD.
 
 ## License
 
