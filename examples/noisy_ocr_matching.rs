@@ -125,7 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
 
         let interpretation = if rho < 1.0 {
-            "Ignores outliers (robust)"
+            "Ignores outliers"
         } else {
             "Forces full match (sensitive)"
         };

@@ -2,10 +2,8 @@
 
 [![crates.io](https://img.shields.io/crates/v/wass.svg)](https://crates.io/crates/wass)
 [![Documentation](https://docs.rs/wass/badge.svg)](https://docs.rs/wass)
-[![CI](https://github.com/arclabs561/wass/actions/workflows/ci.yml/badge.svg)](https://github.com/arclabs561/wass/actions/workflows/ci.yml)
 
-Optimal transport: exact Wasserstein distance, the Sinkhorn
-algorithm with epsilon scheduling, and Sinkhorn divergence.
+Optimal transport distances.
 
 ## Problem
 
@@ -26,7 +24,7 @@ Noisy OCR (20 tokens): "HEADER: CONFIDENTIAL 2025 The qarterly earnigns ..."
 Aligning with Unbalanced Sinkhorn (epsilon=0.1)
 Rho    Divergence Interpretation
 ------------------------------------------------------------
-0.5    0.3150     Ignores outliers (robust)
+0.5    0.3150     Ignores outliers
   credible matches (p>=0.02, dist<=0.70):
     quarterly       -> qarterly         p=0.12  dist=0.38
     earnings        -> earnigns         p=0.10  dist=0.49
