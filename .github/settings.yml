@@ -19,7 +19,10 @@ repository:
     - entropic-regularization
     - optimal-transport
     - rust
+    - sinkhorn
     - sinkhorn-algorithm
     - sinkhorn-divergence
+    - sliced-wasserstein
     - unbalanced-optimal-transport
+    - wasserstein
     - wasserstein-distance
