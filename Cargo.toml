@@ -34,7 +34,7 @@ innr = { version = "0.4", optional = true }
 proptest = "1.5"
 clump = "0.5"
 symproj = "0.1"
-text-splitter = "0.32"
+text-splitter = "0.33"
 criterion = { version = "0.5", features = ["html_reports"] }
 # Rosetta cross-language correctness fixtures (tests/rosetta_*.rs).
 serde = { version = "1.0", features = ["derive"] }
