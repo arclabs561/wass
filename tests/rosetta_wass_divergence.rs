@@ -6,10 +6,10 @@
 //!
 //!   S = max(0, OT(a, b) - 0.5 * (OT(a, a) + OT(b, b)))
 //!
-//! where each OT(x, y) is the *transport cost* <C, P> of the log-domain entropic
-//! OT plan (NOT the full regularized objective). The reference composes the same
-//! quantity from POT's log-domain plans reduced to <C, P>, so it is
-//! definitionally identical to wass and differs only in f32-vs-f64 arithmetic.
+//! where each OT(x, y) is the entropic OT value <C, P> + reg * KL(P || x (x) y)
+//! at the optimal plan (Feydy et al. 2019). The reference evaluates the same
+//! objective on POT's log-domain plans, so it differs from wass only in
+//! f32-vs-f64 arithmetic.
 //! This is the deferred divergence half of `rosetta_wass.rs`.
 //!
 //! TIGHT tolerance class with an f32 floor. S is a cancellation of three

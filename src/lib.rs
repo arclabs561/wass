@@ -175,6 +175,42 @@ pub(crate) fn logsumexp_by(len: usize, mut f: impl FnMut(usize) -> f32) -> f32 {
     max_val + sum_exp.ln()
 }
 
+/// `max` that propagates NaN (`f32::max` returns the non-NaN operand).
+fn nan_max(acc: f32, x: f32) -> f32 {
+    if acc.is_nan() || x.is_nan() {
+        f32::NAN
+    } else {
+        acc.max(x)
+    }
+}
+
+/// Entropic OT value `<C, P> + reg * KL(P || a (x) b)` for a balanced plan.
+///
+/// This is the `OT_eps` that the Sinkhorn divergence debiases (Feydy et al.,
+/// 2019); their positivity and metrization results are proved for this value,
+/// not for `<C, P>` alone. `a` and `b` are normalized the same way the
+/// balanced solvers normalize them.
+fn entropic_ot_value(
+    plan: &Array2<f32>,
+    transport_cost: f32,
+    a: &Array1<f32>,
+    b: &Array1<f32>,
+    reg: f32,
+) -> f32 {
+    let a_sum = a.sum() + EPSILON;
+    let b_sum = b.sum() + EPSILON;
+    let mut kl: f64 = 0.0;
+    for ((i, j), &p) in plan.indexed_iter() {
+        if p <= 0.0 {
+            continue;
+        }
+        let p = p as f64;
+        let q = (a[i] / a_sum) as f64 * (b[j] / b_sum) as f64;
+        kl += p * (p / q).ln();
+    }
+    transport_cost + reg * kl as f32
+}
+
 /// 1D Wasserstein distance (Earth Mover's Distance) via CDF integration.
 ///
 /// The 1D Wasserstein-1 distance admits a closed-form solution (Vallender, 1974):
@@ -407,16 +443,19 @@ pub fn sinkhorn_with_convergence(
             let mut max_err = 0.0f32;
             for i in 0..m {
                 let row_sum = u[i] * kv2[i];
-                max_err = max_err.max((row_sum - a[i]).abs());
+                max_err = nan_max(max_err, (row_sum - a[i]).abs());
             }
             // ktu was computed with the just-updated u; now v is updated too,
             // so recompute K^T u with current u for the col check.
             let ktu2 = k.t().dot(&u);
             for j in 0..n {
                 let col_sum = v[j] * ktu2[j];
-                max_err = max_err.max((col_sum - b[j]).abs());
+                max_err = nan_max(max_err, (col_sum - b[j]).abs());
             }
 
+            if max_err.is_nan() {
+                return Err(Error::Domain("sinkhorn marginal error is NaN"));
+            }
             if max_err < tol {
                 let mut plan = k.clone();
                 for i in 0..m {
@@ -494,7 +533,8 @@ pub fn sinkhorn_divergence(
     reg: f32,
     max_iter: usize,
 ) -> f32 {
-    let (_, ot_pq) = sinkhorn_log(a, b, cost, reg, max_iter);
+    let (p_pq, c_pq) = sinkhorn_log(a, b, cost, reg, max_iter);
+    let ot_pq = entropic_ot_value(&p_pq, c_pq, a, b, reg);
 
     // Internal cost matrices for self-distance
     let m = a.len();
@@ -506,8 +546,10 @@ pub fn sinkhorn_divergence(
 
     // Simplified assumption: if cost is square, use it for p-p and q-q.
     if m == n {
-        let (_, ot_pp) = sinkhorn_log(a, a, cost, reg, max_iter);
-        let (_, ot_qq) = sinkhorn_log(b, b, cost, reg, max_iter);
+        let (p_pp, c_pp) = sinkhorn_log(a, a, cost, reg, max_iter);
+        let (p_qq, c_qq) = sinkhorn_log(b, b, cost, reg, max_iter);
+        let ot_pp = entropic_ot_value(&p_pp, c_pp, a, a, reg);
+        let ot_qq = entropic_ot_value(&p_qq, c_qq, b, b, reg);
         (ot_pq - 0.5 * (ot_pp + ot_qq)).max(0.0)
     } else {
         // This is not Sinkhorn divergence. Use `sinkhorn_divergence_general` if you have
@@ -519,7 +561,9 @@ pub fn sinkhorn_divergence(
 
 /// De-biased Sinkhorn divergence for distributions on the **same support**.
 ///
-/// Computes \(S_\varepsilon(a, b) = \mathrm{OT}_\varepsilon(a,b) - \tfrac{1}{2}(\mathrm{OT}_\varepsilon(a,a) + \mathrm{OT}_\varepsilon(b,b))\).
+/// Computes \(S_\varepsilon(a, b) = \mathrm{OT}_\varepsilon(a,b) - \tfrac{1}{2}(\mathrm{OT}_\varepsilon(a,a) + \mathrm{OT}_\varepsilon(b,b))\),
+/// where \(\mathrm{OT}_\varepsilon(a,b) = \langle C, P \rangle + \varepsilon\,\mathrm{KL}(P \,\|\, a \otimes b)\)
+/// at the optimal plan \(P\), entropy term included.
 ///
 /// **Preconditions**: `a.len() == b.len() == n`, `cost` is \(n \times n\).
 ///
@@ -567,9 +611,12 @@ pub fn sinkhorn_divergence_same_support(
         return Err(Error::CostShapeMismatch(n, n, cost.nrows(), cost.ncols()));
     }
 
-    let (_p_pq, ot_pq, _iters_pq) = sinkhorn_log_with_convergence(a, b, cost, reg, max_iter, tol)?;
-    let (_p_pp, ot_pp, _iters_pp) = sinkhorn_log_with_convergence(a, a, cost, reg, max_iter, tol)?;
-    let (_p_qq, ot_qq, _iters_qq) = sinkhorn_log_with_convergence(b, b, cost, reg, max_iter, tol)?;
+    let (p_pq, c_pq, _iters_pq) = sinkhorn_log_with_convergence(a, b, cost, reg, max_iter, tol)?;
+    let (p_pp, c_pp, _iters_pp) = sinkhorn_log_with_convergence(a, a, cost, reg, max_iter, tol)?;
+    let (p_qq, c_qq, _iters_qq) = sinkhorn_log_with_convergence(b, b, cost, reg, max_iter, tol)?;
+    let ot_pq = entropic_ot_value(&p_pq, c_pq, a, b, reg);
+    let ot_pp = entropic_ot_value(&p_pp, c_pp, a, a, reg);
+    let ot_qq = entropic_ot_value(&p_qq, c_qq, b, b, reg);
 
     // In exact arithmetic this is >= 0, but allow tiny negative drift.
     Ok((ot_pq - 0.5 * (ot_pp + ot_qq)).max(0.0))
@@ -619,12 +666,12 @@ pub fn sinkhorn_divergence_general(
         ));
     }
 
-    let (_p_pq, ot_pq, _iters_pq) =
-        sinkhorn_log_with_convergence(a, b, cost_ab, reg, max_iter, tol)?;
-    let (_p_pp, ot_pp, _iters_pp) =
-        sinkhorn_log_with_convergence(a, a, cost_aa, reg, max_iter, tol)?;
-    let (_p_qq, ot_qq, _iters_qq) =
-        sinkhorn_log_with_convergence(b, b, cost_bb, reg, max_iter, tol)?;
+    let (p_pq, c_pq, _iters_pq) = sinkhorn_log_with_convergence(a, b, cost_ab, reg, max_iter, tol)?;
+    let (p_pp, c_pp, _iters_pp) = sinkhorn_log_with_convergence(a, a, cost_aa, reg, max_iter, tol)?;
+    let (p_qq, c_qq, _iters_qq) = sinkhorn_log_with_convergence(b, b, cost_bb, reg, max_iter, tol)?;
+    let ot_pq = entropic_ot_value(&p_pq, c_pq, a, b, reg);
+    let ot_pp = entropic_ot_value(&p_pp, c_pp, a, a, reg);
+    let ot_qq = entropic_ot_value(&p_qq, c_qq, b, b, reg);
 
     Ok((ot_pq - 0.5 * (ot_pp + ot_qq)).max(0.0))
 }
@@ -836,17 +883,23 @@ pub fn sinkhorn_log_with_convergence(
 
         if (iter + 1) % check_every == 0 || iter + 1 == max_iter {
             // max marginal error: compute row/col sums from current (f,g).
+            // Combine exponents before `exp`: exp(f_i/reg) alone overflows f32
+            // once C/reg exceeds ~88, and inf * 0 = NaN would then be dropped by
+            // `f32::max`, reporting convergence on a garbage plan.
             let mut max_err = 0.0f32;
             for i in 0..m {
-                // row_sum = exp(f_i/reg) * Σ_j exp((g_j - C_ij)/reg)
+                // row_sum = exp(f_i/reg + LSE_j((g_j - C_ij)/reg))
                 let lse = logsumexp_by(n, |j| (g[j] - cost[[i, j]]) / reg);
-                let row_sum = (f[i] / reg).exp() * lse.exp();
-                max_err = max_err.max((row_sum - a[i]).abs());
+                let row_sum = (f[i] / reg + lse).exp();
+                max_err = nan_max(max_err, (row_sum - a[i]).abs());
             }
             for j in 0..n {
                 let lse = logsumexp_by(m, |i| (f[i] - cost[[i, j]]) / reg);
-                let col_sum = (g[j] / reg).exp() * lse.exp();
-                max_err = max_err.max((col_sum - b[j]).abs());
+                let col_sum = (g[j] / reg + lse).exp();
+                max_err = nan_max(max_err, (col_sum - b[j]).abs());
+            }
+            if max_err.is_nan() {
+                return Err(Error::Domain("sinkhorn marginal error is NaN"));
             }
             if max_err < tol {
                 // Build plan once at the end.
@@ -889,13 +942,15 @@ pub fn sinkhorn_log_with_convergence(
 ///
 /// The returned `objective` matches this scaling formulation:
 /// \[
-///   \min_{P\ge 0}\; \langle P, C \rangle
-///   + \varepsilon\,\mathrm{KL}(P\,\|\,K)
+///   \min_{P\ge 0}\; \varepsilon\,\mathrm{KL}(P\,\|\,K)
 ///   + \rho\,\mathrm{KL}(P\mathbf{1}\,\|\,a)
 ///   + \rho\,\mathrm{KL}(P^\top\mathbf{1}\,\|\,b),
 ///     \quad K_{ij}=\exp(-C_{ij}/\varepsilon).
 ///
 /// \]
+///
+/// (Chizat et al., 2018). The transport cost is inside the first term:
+/// \(\varepsilon\,\mathrm{KL}(P\,\|\,K) = \langle P, C \rangle + \varepsilon \sum (P \log P - P + K)\).
 pub fn unbalanced_sinkhorn_log_with_convergence(
     a: &Array1<f32>,
     b: &Array1<f32>,
@@ -1003,7 +1058,6 @@ pub fn unbalanced_sinkhorn_log_with_convergence(
 
             if max_diff < tol {
                 let mut plan = Array2::zeros((m, n));
-                let mut transport_cost = 0.0;
                 for i in 0..m {
                     for j in 0..n {
                         if log_u[i] == f32::NEG_INFINITY || log_v[j] == f32::NEG_INFINITY {
@@ -1013,12 +1067,11 @@ pub fn unbalanced_sinkhorn_log_with_convergence(
                         let log_p = log_u[i] + log_v[j] - (cost[[i, j]] / reg);
                         let pij = log_p.exp();
                         plan[[i, j]] = pij;
-                        transport_cost += pij * cost[[i, j]];
                     }
                 }
 
                 // Compute the full objective for the scaling formulation:
-                // <C,P> + ε KL(P || K) + ρ KL(P1 || a) + ρ KL(Pᵀ1 || b)
+                // ε KL(P || K) + ρ KL(P1 || a) + ρ KL(Pᵀ1 || b)
                 //
                 // We use the generalized (unnormalized) KL:
                 // KL(p||q) = Σ p log(p/q) - p + q, with p=0 contributing +q.
@@ -1065,7 +1118,10 @@ pub fn unbalanced_sinkhorn_log_with_convergence(
                 }
                 kl_plan += sum_k;
 
-                let obj = transport_cost + reg * (kl_plan as f32) + rho * (kl_row + kl_col);
+                // eps KL(P || K) = <C, P> + eps (sum P log P - P + K), so the
+                // transport cost is already in `kl_plan`; adding it again would
+                // count <C, P> twice.
+                let obj = reg * (kl_plan as f32) + rho * (kl_row + kl_col);
 
                 return Ok((plan, obj, iter + 1));
             }

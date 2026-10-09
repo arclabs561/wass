@@ -10,15 +10,13 @@ computes, for two histograms on the same n-bin support with an n x n cost C:
 
     S = max(0, OT(a, b) - 0.5 * (OT(a, a) + OT(b, b)))
 
-where each OT(x, y) is the *transport cost* <C, P> of the log-domain entropic OT
-plan (wass::sinkhorn_log_with_convergence returns <C, P>, NOT the full
-entropy-regularized objective). This is the de-biasing convention of Feydy et al.
-(2018), composed from the linear transport cost rather than the regularized loss.
+where each OT(x, y) is the entropic OT value <C, P> + reg * KL(P || x (x) y) at
+the optimal plan P (Feydy et al. 2019, Eq. 1). The entropy term is what makes
+S a divergence; <C, P> alone does not.
 
-The reference mirrors that exactly: each OT term is POT's log-domain plan
-(ot.sinkhorn(..., method="sinkhorn_log")) reduced to <C, P> = sum(P * C), then
-composed the same way. So the reference is definitionally identical to wass and
-differs only in f32-vs-f64 arithmetic.
+The reference takes each plan from POT's log-domain solver
+(ot.sinkhorn(..., method="sinkhorn_log")) and evaluates the same objective, so
+it differs from wass only in f32-vs-f64 arithmetic.
 
 Note on tolerance: S is a *cancellation* of three same-magnitude OT terms, so its
 absolute error is bounded by the per-term f32 floor (~1e-4), not by |S|. The Rust
@@ -63,7 +61,10 @@ def ot_cost(a, b, cost, reg):
     )
     marg_err = max(np.abs(plan.sum(axis=1) - a).max(), np.abs(plan.sum(axis=0) - b).max())
     assert marg_err < 1e-6, f"OT term not converged (marg_err={marg_err:.2e})"
-    return float(np.sum(plan * cost))
+    product = np.outer(a, b)
+    positive = plan > 0
+    kl = float(np.sum(plan[positive] * np.log(plan[positive] / product[positive])))
+    return float(np.sum(plan * cost)) + reg * kl
 
 
 def make_case(name, a, b, cost, reg):
@@ -79,7 +80,7 @@ def make_case(name, a, b, cost, reg):
         "name": name,
         "reg": reg,
         # wass-side convergence controls; tight enough that the f32 plan is near
-        # the true fixed point, so <C, P> matches POT's f64 <C, P> to the f32 floor.
+        # the true fixed point, so OT_eps matches POT's f64 value to the f32 floor.
         "max_iter": MAX_ITER,
         "tol": 1e-6,
         "a": a.tolist(),
@@ -133,7 +134,7 @@ fixture = {
         "numpy_version": np.__version__,
         "python": platform.python_version(),
         "seed": SEED,
-        "note": "Divergence de-biased from <C,P> transport costs (Feydy 2018), matching wass; f32 cancellation floor is ~1e-4.",
+        "note": "Divergence de-biased from entropic OT values <C,P> + reg*KL(P||a(x)b) (Feydy 2019), matching wass; f32 cancellation floor is ~1e-4.",
     },
     "cases": cases,
 }

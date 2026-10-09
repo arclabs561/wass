@@ -2,11 +2,11 @@
   "provenance": {
     "generator": "gen_wass_sinkhorn_divergence.py",
     "library": "POT (Python Optimal Transport)",
-    "pot_version": "0.9.6.post1",
-    "numpy_version": "2.5.0",
+    "pot_version": "0.9.7.post1",
+    "numpy_version": "2.5.3",
     "python": "3.13.9",
     "seed": 11,
-    "note": "Divergence de-biased from <C,P> transport costs (Feydy 2018), matching wass; f32 cancellation floor is ~1e-4."
+    "note": "Divergence de-biased from entropic OT values <C,P> + reg*KL(P||a(x)b) (Feydy 2019), matching wass; f32 cancellation floor is ~1e-4."
   },
   "cases": [
     {
@@ -53,10 +53,10 @@
         ]
       ],
       "expected": {
-        "ot_ab": 0.2589456272472238,
-        "ot_aa": 0.20202223104136668,
-        "ot_bb": 0.16638303593978598,
-        "divergence": 0.07474299375664747
+        "ot_ab": 0.6209193485482678,
+        "ot_aa": 0.5895952181518216,
+        "ot_bb": 0.5641962195458343,
+        "divergence": 0.04402362969943985
       }
     },
     {
@@ -116,10 +116,10 @@
         ]
       ],
       "expected": {
-        "ot_ab": 0.8918562699332501,
-        "ot_aa": 0.008495321557412361,
-        "ot_bb": 0.016346767489512054,
-        "divergence": 0.8794352254097879
+        "ot_ab": 1.013589477079652,
+        "ot_aa": 0.27511954269032923,
+        "ot_bb": 0.29880871448949176,
+        "divergence": 0.7266253484897416
       }
     },
     {
@@ -155,9 +155,9 @@
         ]
       ],
       "expected": {
-        "ot_ab": 0.04967119084973759,
-        "ot_aa": 0.04967119084973759,
-        "ot_bb": 0.04967119084973759,
+        "ot_ab": 0.5338303069071731,
+        "ot_aa": 0.5338303069071731,
+        "ot_bb": 0.5338303069071731,
         "divergence": 0.0
       }
     }
