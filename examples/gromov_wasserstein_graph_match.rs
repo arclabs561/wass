@@ -81,7 +81,7 @@ fn main() {
         }
         // Mark the argmax
         let argmax = (0..n)
-            .max_by(|&a, &b| plan[[i, a]].partial_cmp(&plan[[i, b]]).unwrap())
+            .max_by(|&a, &b| plan[[i, a]].total_cmp(&plan[[i, b]]))
             .unwrap();
         print!(
             "  <- A{i} matches B{argmax} (should be B{})",
@@ -94,7 +94,7 @@ fn main() {
     let mut correct = 0;
     for i in 0..n {
         let argmax = (0..n)
-            .max_by(|&a, &b| plan[[i, a]].partial_cmp(&plan[[i, b]]).unwrap())
+            .max_by(|&a, &b| plan[[i, a]].total_cmp(&plan[[i, b]]))
             .unwrap();
         if perm[argmax] == i {
             correct += 1;

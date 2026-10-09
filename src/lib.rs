@@ -88,6 +88,11 @@
 use ndarray::{Array1, Array2};
 use thiserror::Error;
 
+// Compile and run the README's Rust examples as doctests.
+#[cfg(doctest)]
+#[doc = include_str!("../README.md")]
+struct ReadmeDoctests;
+
 pub mod barycenter;
 pub mod flow;
 pub mod gaussian;
@@ -1877,11 +1882,34 @@ fn random_unit_direction(d: usize, rng: &mut impl rand::Rng) -> Array1<f32> {
     direction
 }
 
-/// Wasserstein-p on two sorted 1D projections of equal length.
+/// Wasserstein-p between uniform measures on two sorted 1D projections.
+///
+/// For unequal lengths this integrates `|F^-1(t) - G^-1(t)|^p` over the merged
+/// quantile breakpoints `i/m` and `j/n` (the 1-D monotone coupling).
 fn w_p_sorted(proj_x: &[f32], proj_y: &[f32], p: f32) -> f32 {
-    let n = proj_x.len().min(proj_y.len());
-    if n == 0 {
+    let (m, n) = (proj_x.len(), proj_y.len());
+    if m == 0 || n == 0 {
         return 0.0;
+    }
+    if m != n {
+        let (mut i, mut j) = (0usize, 0usize);
+        let (mut t, mut sum) = (0.0f64, 0.0f64);
+        while i < m && j < n {
+            // Next breakpoints (i+1)/m and (j+1)/n, compared exactly in integers.
+            let lhs = (i + 1) * n;
+            let rhs = (j + 1) * m;
+            let next = lhs.min(rhs) as f64 / (m * n) as f64;
+            let diff = (proj_x[i] - proj_y[j]).abs() as f64;
+            sum += (next - t) * diff.powf(p as f64);
+            t = next;
+            if lhs <= rhs {
+                i += 1;
+            }
+            if rhs <= lhs {
+                j += 1;
+            }
+        }
+        return sum.powf(1.0 / p as f64) as f32;
     }
     if (p - 1.0).abs() < 1e-7 {
         let sum: f32 = (0..n).map(|i| (proj_x[i] - proj_y[i]).abs()).sum();
@@ -1962,7 +1990,7 @@ pub fn sliced_wasserstein(
         let proj_y = project_and_sort(y, &direction, n);
         let wp = w_p_sorted(&proj_x, &proj_y, p);
         // Aggregate W_p^p, then take p-th root at the end
-        total += (wp as f64).powi(p as i32);
+        total += (wp as f64).powf(p as f64);
     }
 
     (total / n_projections as f64).powf(1.0 / p as f64) as f32
@@ -2152,7 +2180,7 @@ fn partition_by_cost_projection(
     k: usize,
 ) -> Vec<Vec<usize>> {
     let mut indexed: Vec<(usize, f32)> = indices.iter().map(|&i| (i, cost_row(i))).collect();
-    indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    indexed.sort_by(|a, b| a.1.total_cmp(&b.1));
 
     let total = indexed.len();
     let base_size = total / k;

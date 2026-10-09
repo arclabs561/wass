@@ -15,9 +15,13 @@
 //! **Applications**: shape matching, cross-lingual word embedding alignment,
 //! graph comparison, protein structure alignment.
 //!
-//! **Algorithm**: projected gradient descent -- at each outer iteration, linearize the
-//! quadratic objective to get a linear cost matrix \(G\), then solve the linearized
-//! problem with Sinkhorn. This is a.k.a. the "Frank-Wolfe" or "conditional gradient" scheme.
+//! **Algorithm**: the entropic GW iteration of Peyre, Cuturi & Solomon (2016,
+//! Algorithm 1). At each outer iteration, linearize the quadratic objective at the
+//! current plan to get a cost matrix \(G\), then replace the plan with the Sinkhorn
+//! solution for \(G\). This is mirror descent in the KL geometry with step size
+//! \(1/\varepsilon\). It is not Frank-Wolfe (conditional gradient), which moves to a
+//! convex combination of the current plan and an unregularized LP solution with a
+//! line search, as in POT's `ot.gromov.gromov_wasserstein`.
 //!
 //! ## References
 //!
@@ -25,7 +29,7 @@
 //! - Peyre, Cuturi, Solomon (2016). "Gromov-Wasserstein Averaging"
 //! - Peyre & Cuturi (2019). "Computational Optimal Transport", Ch. 10
 //! - Rioux, Goldfeld, Kato (2023). "Entropic Gromov-Wasserstein Distances:
-//!   Stability and Algorithms" -- convergence rates for the Frank-Wolfe/Sinkhorn scheme
+//!   Stability and Algorithms" -- convergence guarantees for entropic GW algorithms
 //! - Zhang et al. (2024). "Fast Gradient Computation for Gromov-Wasserstein Distance"
 //!   -- accelerated gradient for the C1*P*C2^T inner loop (potential future optimization)
 //! - Beier et al. (2021). "On a Linear Gromov-Wasserstein Distance" -- O(n^2)
@@ -48,7 +52,7 @@ use ndarray::{Array1, Array2};
 /// * `p` - Source marginal (length \(m\), sums to 1)
 /// * `q` - Target marginal (length \(n\), sums to 1)
 /// * `epsilon` - Entropic regularization \(\varepsilon > 0\)
-/// * `max_iter` - Outer (Frank-Wolfe) iterations
+/// * `max_iter` - Outer (linearize, then Sinkhorn) iterations
 /// * `sinkhorn_iter` - Inner Sinkhorn iterations per linearization
 pub fn gromov_wasserstein(
     c1: &Array2<f64>,
@@ -83,18 +87,20 @@ pub fn gromov_wasserstein(
         }
     }
 
-    let mut gw_dist = 0.0;
-
-    for _iter in 0..max_iter {
-        let c1_p = c1.dot(&plan);
-        let c1_p_c2t = c1_p.dot(&c2.t());
-
-        let mut g = Array2::zeros((m, n));
+    // L(C1, C2) (x) P for the square loss; <L (x) P, P> is the distortion of P.
+    let linearized_cost = |plan: &Array2<f64>| {
+        let c1_p_c2t = c1.dot(plan).dot(&c2.t());
+        let mut g = Array2::<f64>::zeros((m, n));
         for i in 0..m {
             for j in 0..n {
                 g[[i, j]] = mu_c1_sq[i] + nu_c2_sq[j] - 2.0 * c1_p_c2t[[i, j]];
             }
         }
+        g
+    };
+
+    for _iter in 0..max_iter {
+        let g = linearized_cost(&plan);
 
         // `sinkhorn_log` currently operates on f32; keep the public GW API in f64, but
         // do the Sinkhorn substep in f32.
@@ -103,8 +109,15 @@ pub fn gromov_wasserstein(
         let g32 = g.mapv(|x| x as f32);
         let (new_plan32, _dist) = sinkhorn_log(&p32, &q32, &g32, epsilon as f32, sinkhorn_iter);
         plan = new_plan32.mapv(|x| x as f64);
-        gw_dist = g.iter().zip(plan.iter()).map(|(gi, pi)| gi * pi).sum();
     }
+
+    // Report the distortion of the returned plan, not the previous iterate's
+    // linearization paired with it.
+    let gw_dist: f64 = linearized_cost(&plan)
+        .iter()
+        .zip(plan.iter())
+        .map(|(gi, pi)| gi * pi)
+        .sum();
 
     Ok((plan, gw_dist))
 }

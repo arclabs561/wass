@@ -7,9 +7,10 @@
 //! Unlike balanced OT, WFR handles **unnormalized** measures: the input
 //! histograms need not sum to the same value.
 //!
-//! The parameter `rho` controls the tradeoff:
-//! - Large `rho`: transport is cheap relative to mass change, approaches Wasserstein.
-//! - Small `rho`: mass creation/destruction is cheap, approaches Fisher-Rao.
+//! The parameter `rho` is the length scale `delta` of Chizat et al. (2018):
+//! - Large `rho`: transport is cheap relative to mass change, approaches W_2.
+//! - Small `rho`: mass creation/destruction is cheap, approaches Fisher-Rao
+//!   (Hellinger).
 //!
 //! ## Algorithm
 //!
@@ -19,8 +20,18 @@
 //! c_{\mathrm{WFR}}(x,y) = -\log\!\bigl(\cos^2\!\bigl(\min\bigl(\tfrac{d(x,y)}{2\rho},\, \tfrac{\pi}{2}\bigr)\bigr)\bigr)
 //! $$
 //!
-//! This is then fed into the standard KL-penalized unbalanced Sinkhorn solver
-//! with marginal penalty `rho`.
+//! with `rho = delta`. The static problem puts unit weight on both KL
+//! marginal penalties, and
+//!
+//! $$
+//! \mathrm{WFR}_\delta^2(\mu, \nu) = 4\delta^2 \min_{\gamma}\Bigl[\langle \gamma, c_{\mathrm{WFR}} \rangle +
+//!   \mathrm{KL}(\gamma \mathbf{1} \,\|\, \mu) + \mathrm{KL}(\gamma^\top \mathbf{1} \,\|\, \nu)\Bigr].
+//! $$
+//!
+//! For two Diracs this gives
+//! `4 delta^2 (m0 + m1 - 2 sqrt(m0 m1) cos(min(d / (2 delta), pi/2)))`.
+//! The bracket is solved with the debiased unbalanced Sinkhorn divergence at
+//! unit marginal penalty.
 //!
 //! ## References
 //!
@@ -75,15 +86,15 @@ fn wfr_cost_from_sq_distance(cost_sq: &Array2<f32>, rho: f32) -> Array2<f32> {
 /// * `a` - Source histogram (non-negative, need not sum to 1)
 /// * `b` - Target histogram (non-negative, need not sum to 1, same length as `a`)
 /// * `cost` - Ground **squared** distance matrix (n x n, symmetric).
-/// * `rho` - Transport/creation tradeoff. Larger values favor transport over
-///   mass creation/destruction.
+/// * `rho` - Length scale `delta`. Larger values favor transport over
+///   mass creation/destruction; transport beyond distance `pi * delta` is never used.
 /// * `reg` - Entropic regularization strength (epsilon > 0).
 /// * `max_iter` - Maximum Sinkhorn iterations.
 /// * `tol` - Convergence tolerance.
 ///
 /// # Returns
 ///
-/// The WFR distance (square root of the debiased objective).
+/// The WFR distance, `2 * rho * sqrt(divergence)`.
 ///
 /// # Errors
 ///
@@ -135,13 +146,14 @@ pub fn wfr_distance(
     // Transform the ground cost matrix for WFR.
     let wfr_cost = wfr_cost_from_sq_distance(cost, rho);
 
-    // Use debiased unbalanced Sinkhorn divergence so that d(a,a) = 0.
+    // Debiased unbalanced Sinkhorn divergence so that d(a,a) = 0. The KL
+    // marginal penalties carry unit weight; the length scale enters through
+    // the cost and the 4 * rho^2 prefactor (Chizat et al. 2018).
     let div = crate::unbalanced_sinkhorn_divergence_same_support(
-        a, b, &wfr_cost, reg, rho, max_iter, tol,
+        a, b, &wfr_cost, reg, 1.0, max_iter, tol,
     )?;
 
-    // WFR distance is the square root of the divergence value.
-    Ok(div.max(0.0).sqrt())
+    Ok(2.0 * rho * div.max(0.0).sqrt())
 }
 
 #[cfg(test)]
