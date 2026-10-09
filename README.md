@@ -73,6 +73,7 @@ cargo run --example barycenter_morph
 ```toml
 [dependencies]
 wass = "0.2"
+ndarray = "0.16"
 ```
 
 ```rust
@@ -98,6 +99,13 @@ cargo test -p wass
 ```
 
 Tests cover Sinkhorn convergence, transport plan marginal validity, divergence properties (symmetry, non-negativity, convexity, cost-shift invariance), unbalanced OT, Gromov-Wasserstein, sparse transport, semidiscrete OT, flow drift, and EMD.
+
+`tests/rosetta_wass*.rs` compare `sinkhorn`, `sinkhorn_log` and the debiased Sinkhorn divergence against fixtures generated with [POT](https://pythonot.github.io/) (Python Optimal Transport), the reference library for these solvers in Python.
+
+## Limits
+
+- All solvers compute in `f32`. Plain `sinkhorn` builds the kernel `exp(-C / reg)`, which underflows to zero once `C / reg` exceeds about 87; use `sinkhorn_log` for small `reg` or large costs.
+- `sliced_wasserstein` is a Monte Carlo estimate over random directions; its variance shrinks as `1 / n_projections`.
 
 ## License
 

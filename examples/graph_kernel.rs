@@ -10,7 +10,10 @@
 //! 3. Compute pairwise sliced Wasserstein distance
 //! 4. Convert to kernel via K(G1, G2) = exp(-SW(G1, G2) / sigma)
 //!
-//! Reference: Ma, Kolouri & Muandet (2025), "Sliced Wasserstein Graph Kernels"
+//! Reference: Kolouri, Zou & Rohde (2016), "Sliced Wasserstein Kernels for
+//! Probability Distributions", CVPR. That paper defines kernels on sliced
+//! Wasserstein distances between distributions; applying one to node-feature
+//! point clouds, as here, is an illustration rather than a published method.
 
 use ndarray::Array2;
 use wass::sliced_wasserstein;
