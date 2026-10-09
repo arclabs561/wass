@@ -47,7 +47,6 @@
 
 use crate::{Error, Result};
 use ndarray::{Array1, Array2};
-use std::f64;
 
 /// L2 regularization for optimal transport.
 ///
