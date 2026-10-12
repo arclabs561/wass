@@ -1849,10 +1849,12 @@ fn project_and_sort(
     let mut proj = {
         let mut v = Vec::with_capacity(n_points);
         for i in 0..n_points {
-            v.push(innr::dense::dot(
-                points.row(i).as_slice().unwrap(),
-                direction.as_slice().unwrap(),
-            ));
+            let row = points.row(i);
+            let projection = match row.as_slice() {
+                Some(values) => innr::dense::dot(values, direction.as_slice().unwrap()),
+                None => row.dot(direction),
+            };
+            v.push(projection);
         }
         v
     };
@@ -2553,6 +2555,35 @@ mod tests {
     }
 
     // --- sliced_wasserstein tests ---
+
+    #[test]
+    fn sliced_distances_accept_strided_rows() {
+        use ndarray::ShapeBuilder;
+
+        let x = array![[1.0, -2.0, 3.0], [4.0, 2.0, -1.0], [-3.0, 0.0, 5.0]];
+        let y = array![[2.0, 1.0, -4.0], [-1.0, 3.0, 2.0]];
+        let x_column_major = Array2::from_shape_fn(x.dim().f(), |ij| x[ij]);
+        let y_column_major = Array2::from_shape_fn(y.dim().f(), |ij| y[ij]);
+        assert_eq!(x, x_column_major);
+        assert_eq!(y, y_column_major);
+        assert!(x_column_major.row(0).as_slice().is_none());
+        assert!(y_column_major.row(0).as_slice().is_none());
+
+        for distance in [sliced_wasserstein, max_sliced_wasserstein] {
+            for p in [1.0, 1.5, 2.0] {
+                let expected = distance(&x, &y, 50, 42, p);
+                assert!(expected > 0.0);
+                for (a, b) in [
+                    (&x_column_major, &y),
+                    (&x, &y_column_major),
+                    (&x_column_major, &y_column_major),
+                ] {
+                    let actual = distance(a, b, 50, 42, p);
+                    assert!((actual - expected).abs() < 1e-5 * expected);
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_sliced_wasserstein_self_distance() {
