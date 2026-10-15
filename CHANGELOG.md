@@ -1,5 +1,15 @@
 # Changelog
 
+## Source history (unversioned)
+
+These source changes are not assigned to a package release here.
+
+- With SIMD enabled, `sliced_wasserstein` and `max_sliced_wasserstein` accept
+  owned ndarrays with strided rows, including column-major arrays. Projection
+  falls back to ndarray's dot product for noncontiguous rows instead of
+  panicking; contiguous rows retain the SIMD path.
+  ([source](https://github.com/arclabs561/wass/commit/1ff8f6b2bcd712c444a80f7f9381673a82218951))
+
 ## [Unreleased]
 
 ## [0.2.3] - 2026-10-09
