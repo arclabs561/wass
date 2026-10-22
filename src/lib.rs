@@ -511,11 +511,16 @@ pub fn earth_mover_distance(a: &Array1<f32>, b: &Array1<f32>, cost: &Array2<f32>
 /// \(\mathrm{OT}_\varepsilon(a, a) > 0\) even when \(a = b\). The self-transport
 /// terms correct this, yielding a proper divergence (\(S_\varepsilon(a, a) = 0\)).
 ///
-/// **Interpolation** (Feydy et al., 2018): as \(\varepsilon \to 0\),
-/// \(S_\varepsilon \to W_p^p\) (Wasserstein); as \(\varepsilon \to \infty\),
-/// \(S_\varepsilon \to \text{MMD}^2\) (Maximum Mean Discrepancy with the
-/// cost kernel). This makes it a smooth bridge between geometry-aware and
-/// kernel-based distribution comparison.
+/// **Interpolation** for probability measures and exact optimal plans
+/// ([Feydy et al., 2019](https://proceedings.mlr.press/v89/feydy19a.html), Eq. 4):
+/// with ground cost `C(x,y) = d(x,y)^p`, the small-regularization limit is
+/// `W_p^p`. The large-regularization limit is
+/// `E_ab[C] - (E_aa[C] + E_bb[C]) / 2`,
+/// equivalently one-half the squared kernel seminorm of `a - b` for kernel `-C`,
+/// when that (possibly conditionally positive) kernel seminorm is defined. Calling this MMD squared
+/// absorbs the factor one-half into the kernel `-C/2`.
+/// See [`sinkhorn_divergence_same_support`] for the divergence theorem's assumptions;
+/// this fixed-iteration wrapper does not check convergence.
 ///
 /// # Warning
 ///
@@ -572,11 +577,19 @@ pub fn sinkhorn_divergence(
 ///
 /// **Preconditions**: `a.len() == b.len() == n`, `cost` is \(n \times n\).
 ///
-/// **Properties** (Feydy et al., 2018):
+/// **Properties of the exact objective** ([Feydy et al., 2019](https://proceedings.mlr.press/v89/feydy19a.html),
+/// Theorem 1): for probability measures on a compact metric space, a symmetric
+/// Lipschitz ground cost inducing a positive universal kernel
+/// `k_epsilon(x,y) = exp(-C(x,y) / epsilon)`, and `epsilon > 0`:
 /// - \(S_\varepsilon(a, a) = 0\) (zero self-divergence)
 /// - \(S_\varepsilon(a, b) \ge 0\) (positive definite)
 /// - Symmetric: \(S_\varepsilon(a, b) = S_\varepsilon(b, a)\)
 /// - Metrizes weak convergence for fixed \(\varepsilon > 0\)
+///
+/// Shape checks alone do not establish these cost/kernel assumptions. The solver
+/// checks marginal convergence to `tol`; finite iterations and `f32` arithmetic
+/// approximate the ideal objective. Clamping the result to zero does not establish
+/// the theorem for arbitrary cost matrices.
 ///
 /// # Example
 ///
@@ -599,7 +612,7 @@ pub fn sinkhorn_divergence(
 /// assert!(sab > 0.0 && (sab - sba).abs() < 1e-6);
 /// ```
 ///
-/// Returns an error rather than silently producing a biased quantity.
+/// Returns an error on invalid shapes or failed marginal convergence.
 pub fn sinkhorn_divergence_same_support(
     a: &Array1<f32>,
     b: &Array1<f32>,
@@ -633,6 +646,11 @@ pub fn sinkhorn_divergence_same_support(
 /// - `cost_ab` for X×Y
 /// - `cost_aa` for X×X
 /// - `cost_bb` for Y×Y
+///
+/// All three matrices must evaluate the same underlying ground cost on the
+/// respective supports. The probability-measure, cost/kernel and numerical
+/// qualifications in [`sinkhorn_divergence_same_support`] also apply here;
+/// correctly shaped but unrelated matrices do not define the claimed divergence.
 #[allow(clippy::too_many_arguments)]
 pub fn sinkhorn_divergence_general(
     a: &Array1<f32>,

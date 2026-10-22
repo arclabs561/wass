@@ -14,6 +14,10 @@ These source changes are not assigned to a package release here.
 
 ### Documentation
 
+- Qualify Sinkhorn divergence guarantees by probability-measure, shared-cost/kernel
+  and numerical-convergence assumptions, and state the large-regularization
+  limit with its one-half kernel normalization. Solver behavior is unchanged.
+
 - Clarify powered versus rooted sliced-Wasserstein estimator bias and describe
   max-sliced estimation as random-direction sampling, without gradient optimization.
   Numerical behavior and public APIs are unchanged.

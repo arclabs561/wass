@@ -57,7 +57,7 @@ cargo run --example barycenter_morph
 |---|---|
 | `wasserstein_1d` | Closed-form 1D Wasserstein distance, O(n) |
 | `sinkhorn` / `sinkhorn_log` | Entropy-regularized OT (log-domain for stability) |
-| `sinkhorn_divergence_*` | Debiased Sinkhorn divergences (positive, symmetric) |
+| `sinkhorn_divergence_*` | Debiased entropic OT (cost/kernel assumptions below) |
 | `unbalanced_sinkhorn_*` | Robust OT for partial matching and outliers |
 | `euclidean_cost_matrix` | L2 cost matrix from point clouds |
 | `sq_euclidean_cost_matrix` | Squared L2 cost (correct for W2 OT-CFM) |
@@ -104,6 +104,8 @@ Tests cover Sinkhorn convergence, transport plan marginal validity, divergence p
 
 ## Limits
 
+- Sinkhorn divergence guarantees concern probability measures and exact converged objectives with a shared admissible ground cost. [Feydy et al. (2019), Theorem 1](https://proceedings.mlr.press/v89/feydy19a.html) assumes a compact metric space and a symmetric Lipschitz cost whose `exp(-C / reg)` kernel is positive and universal; arbitrary cost matrices do not inherit positivity, symmetry or weak-convergence guarantees. The general-support API needs cross- and self-cost matrices from that same cost. Marginal tolerance and `f32` arithmetic limit numerical accuracy.
+- For exact probability couplings, the large-regularization Sinkhorn limit is `E_ab[C] - (E_aa[C] + E_bb[C]) / 2`: one-half the squared kernel seminorm for kernel `-C`, when defined (or squared MMD with kernel `-C/2`).
 - All solvers compute in `f32`. Plain `sinkhorn` builds the kernel `exp(-C / reg)`, which underflows to zero once `C / reg` exceeds about 87; use `sinkhorn_log` for small `reg` or large costs.
 - `sliced_wasserstein` is a Monte Carlo estimate over random directions. For finite point clouds and finite `p`, ideal independent uniform directions give an unbiased sample mean of `W_p^p` with variance `Var(W_p^p) / n_projections`. The returned p-th root is generally downward biased for `p > 1`, but consistent as the projection count grows; these statements assume exact arithmetic.
 
