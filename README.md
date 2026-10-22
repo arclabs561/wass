@@ -105,7 +105,7 @@ Tests cover Sinkhorn convergence, transport plan marginal validity, divergence p
 ## Limits
 
 - All solvers compute in `f32`. Plain `sinkhorn` builds the kernel `exp(-C / reg)`, which underflows to zero once `C / reg` exceeds about 87; use `sinkhorn_log` for small `reg` or large costs.
-- `sliced_wasserstein` is a Monte Carlo estimate over random directions; its variance shrinks as `1 / n_projections`.
+- `sliced_wasserstein` is a Monte Carlo estimate over random directions. For finite point clouds and finite `p`, ideal independent uniform directions give an unbiased sample mean of `W_p^p` with variance `Var(W_p^p) / n_projections`. The returned p-th root is generally downward biased for `p > 1`, but consistent as the projection count grows; these statements assume exact arithmetic.
 
 ## License
 

@@ -1936,8 +1936,11 @@ fn w_p_sorted(proj_x: &[f32], proj_y: &[f32], p: f32) -> f32 {
 /// or `O(n^2 k)` (Sinkhorn). Sliced `W_p` costs only
 /// `O(L * n log n)` where `L` is the number of projections.
 ///
-/// **Trade-off**: the approximation is unbiased but has variance `O(1/L)`.
-/// For `L >= 50` the estimate is usually stable. Larger `d` may need more projections.
+/// **Trade-off**: for finite point clouds and finite `p`, under ideal independent
+/// uniform directions and exact arithmetic, the sample mean of `Z = W_p^p`
+/// is unbiased for `SW_p^p` and has variance `Var(Z) / L`. The returned p-th
+/// root is generally downward biased for `p > 1`, but is consistent as `L`
+/// grows. Projection counts needed for a stable estimate depend on the inputs.
 ///
 /// # Arguments
 ///
@@ -1998,25 +2001,25 @@ pub fn sliced_wasserstein(
     (total / n_projections as f64).powf(1.0 / p as f64) as f32
 }
 
-/// Max-sliced Wasserstein distance: finds the projection maximizing 1D Wasserstein.
+/// Random-direction approximation to the max-sliced Wasserstein distance.
 ///
 /// $$
 /// \mathrm{max\text{-}SW}_p(X, Y) = \max_{\theta \in S^{d-1}} W_p(\theta^\top X,\; \theta^\top Y)
 /// $$
 ///
-/// More discriminative than random projections but slower. Uses projected
-/// gradient ascent on the unit sphere: at each iteration, compute the
-/// gradient of `W_p` with respect to `theta` via finite differences,
-/// take a gradient step, and re-project onto `S^{d-1}`.
+/// Evaluates `max_iter` random directions and returns the largest projected
+/// distance. It does not optimize directions or certify the all-direction
+/// maximum. In exact arithmetic, the sampled maximum is a lower bound on
+/// that objective; floating-point rounding does not provide a certified bound.
 ///
-/// Falls back to the best of `max_iter` random restarts when `d` is large,
-/// since the optimization landscape has many local maxima.
+/// See Deshpande et al. (CVPR 2019), *Max-Sliced Wasserstein Distance and Its
+/// Use for GANs*, Definition 2, for the max-sliced objective.
 ///
 /// # Arguments
 ///
 /// * `x` - Source point cloud (m x d)
 /// * `y` - Target point cloud (n x d)
-/// * `max_iter` - Number of random restarts (each evaluates one direction)
+/// * `max_iter` - Number of random directions to evaluate
 /// * `seed` - RNG seed
 /// * `p` - Wasserstein exponent (>= 1)
 ///
@@ -2060,9 +2063,6 @@ pub fn max_sliced_wasserstein(
     let mut best = 0.0f32;
 
     // For each random direction, compute W_p and keep the max.
-    // This is the "random restart" variant. For true gradient-based
-    // max-sliced, one would differentiate through the sort, which
-    // requires a differentiable framework.
     for _ in 0..max_iter {
         let direction = random_unit_direction(d, &mut rng);
         let proj_x = project_and_sort(x, &direction, m);
