@@ -12,6 +12,12 @@ These source changes are not assigned to a package release here.
 
 ## [Unreleased]
 
+### Documentation
+
+- Clarify powered versus rooted sliced-Wasserstein estimator bias and describe
+  max-sliced estimation as random-direction sampling, without gradient optimization.
+  Numerical behavior and public APIs are unchanged.
+
 ## [0.2.3] - 2026-10-09
 
 ### Changed
