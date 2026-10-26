@@ -293,7 +293,7 @@ pub fn wasserstein_1d(a: &[f32], b: &[f32]) -> f32 {
 /// Solves the regularized Kantorovich problem (Cuturi, 2013):
 ///
 /// \[
-/// \min_{P \in U(a,b)} \langle C, P \rangle + \varepsilon H(P)
+/// \min_{P \in U(a,b)} \langle C, P \rangle - \varepsilon H(P)
 /// \]
 ///
 /// where \(U(a,b) = \{P \ge 0 : P\mathbf{1} = a,\; P^\top\mathbf{1} = b\}\) is

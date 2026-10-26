@@ -14,6 +14,10 @@ These source changes are not assigned to a package release here.
 
 ### Documentation
 
+- Fix the sign of the entropic regularizer in the Sinkhorn and Gromov-Wasserstein
+  objectives: with \(H(P) = -\sum P \log P\) the objective subtracts
+  \(\varepsilon H(P)\) (Cuturi, 2013). The implementation already solved the
+  correct problem; only the documented formula was wrong.
 - Clarify powered versus rooted sliced-Wasserstein estimator bias and describe
   max-sliced estimation as random-direction sampling, without gradient optimization.
   Numerical behavior and public APIs are unchanged.

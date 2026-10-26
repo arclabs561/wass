@@ -5,8 +5,11 @@
 //! plan \(P\) that minimizes the quadratic distortion:
 //!
 //! \[
-//! \mathrm{GW}(C_1, C_2) = \min_{P \in U(p,q)} \sum_{i,j,k,l} |C_1(i,k) - C_2(j,l)|^2 P_{ij} P_{kl} + \varepsilon H(P)
+//! \mathrm{GW}(C_1, C_2) = \min_{P \in U(p,q)} \sum_{i,j,k,l} |C_1(i,k) - C_2(j,l)|^2 P_{ij} P_{kl} - \varepsilon H(P)
 //! \]
+//!
+//! where \(H(P) = -\sum_{ij} P_{ij} \log P_{ij}\) is the entropy, so the
+//! regularizer rewards spread-out plans.
 //!
 //! **Intuition**: GW measures how much the *internal structure* of two spaces differs.
 //! If two graphs have the same topology but different node labels, GW will still find
