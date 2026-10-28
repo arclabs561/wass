@@ -39,7 +39,7 @@ Rho    Divergence Interpretation
 cargo run --example gromov_wasserstein_graph_match
 ```
 
-**Sparse vs. dense plans**. L2-regularized sparse transport plans vs. entropic Sinkhorn plans -- sparse plans have exact zeros, useful when you want hard assignments:
+**Sparse vs. dense plans**. L2-regularized transport plans can have exact zeros, while entropic Sinkhorn plans are dense. Sparsity does not guarantee one-to-one assignments:
 
 ```bash
 cargo run --example sparse_vs_sinkhorn
@@ -55,7 +55,7 @@ cargo run --example barycenter_morph
 
 | Function | What it does |
 |---|---|
-| `wasserstein_1d` | Closed-form 1D Wasserstein distance, O(n) |
+| `wasserstein_1d` | W1 between histograms on shared, unit-spaced bins, O(n) |
 | `sinkhorn` / `sinkhorn_log` | Entropy-regularized OT (log-domain for stability) |
 | `sinkhorn_divergence_*` | Debiased Sinkhorn divergences (positive, symmetric) |
 | `unbalanced_sinkhorn_*` | Robust OT for partial matching and outliers |
@@ -80,8 +80,9 @@ ndarray = "0.16"
 use wass::{wasserstein_1d, sinkhorn_log_with_convergence};
 use ndarray::array;
 
-// 1D (closed-form)
+// Histograms on shared bins at positions 0, 1, 2 (not lists of samples).
 let w1 = wasserstein_1d(&[0.0, 0.5, 0.5], &[0.5, 0.5, 0.0]);
+assert!((w1 - 1.0).abs() < 1e-6);
 
 // General (Sinkhorn, log-domain stable)
 let a = array![0.5, 0.5];

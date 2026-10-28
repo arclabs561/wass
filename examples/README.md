@@ -9,7 +9,7 @@
 | Align documents or noisy text               | `document_alignment_demo`, `noisy_ocr_matching`                  |
 | Match graphs without shared coordinates     | `gromov_wasserstein_graph_match`                                 |
 | Compare graphs as node-feature distributions | `graph_kernel`                                                  |
-| Get sparse (hard-assignment) plans          | `sparse_vs_sinkhorn`                                             |
+| Get sparse transport plans                 | `sparse_vs_sinkhorn`                                             |
 | Handle outliers or mass mismatch            | `unbalanced_outlier_tradeoff`, `unbalanced_sinkhorn_mass_mismatch` |
 | Transfer a color palette via OT             | `color_transfer`                                                 |
 | Register (align) two 2D point clouds        | `point_cloud_registration`                                       |
