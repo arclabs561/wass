@@ -18,7 +18,7 @@
 //! | [`sliced_wasserstein`] | High-dim point clouds (random projections) | O(L n log n) |
 //! | [`max_sliced_wasserstein`] | High-dim point clouds (max projection) | O(L n log n) |
 //! | [`sinkhorn`] | General transport (dense) | O(n² × iterations) |
-//! | [`sinkhorn_low_rank`] | Large-scale transport (rank r) | O((n+m)r × iterations) |
+//! | [`sinkhorn_low_rank`] | Marginal-feasible rank-r coupling (does not minimize cost) | O((n+m)r × iterations) |
 //! | [`sinkhorn_hierarchical`] | Large-scale transport (tree partition) | O(k² + local subproblems) |
 //! | [`sparse::solve_semidual_l2`] | Sparse transport (L2) | O(n² × L-BFGS iter) |
 //! | [`earth_mover_distance`] | Exact transport | O(n³) |
@@ -1475,7 +1475,7 @@ pub struct LowRankCoupling {
     pub r: Vec<f32>,
     /// Transport cost `<C, P>`.
     pub cost: f32,
-    /// Number of Dykstra iterations used.
+    /// Number of alternating row/column scaling iterations used.
     pub iterations: usize,
     /// Dimensions for reconstruction.
     n: usize,
@@ -1565,16 +1565,24 @@ impl LowRankCoupling {
     }
 }
 
-/// Low-rank Sinkhorn factorization (Scetbon, Cuturi & Peyre, ICML 2021).
+/// Marginal-feasible rank-`r` coupling `P = Q diag(g) R^T`, seeded from the Gibbs kernel.
 ///
-/// Approximates the entropic OT coupling as `P = Q diag(g) R^T` where
-/// `Q` is `n x r`, `R` is `m x r`, and `r << min(n, m)`.
+/// `Q` is `n x r` and `R` is `m x r`. Each column of `Q` starts as a column of the
+/// Gibbs kernel `K = exp(-C / reg)` weighted by `a`, and each column of `R` as a row of `K`
+/// weighted by `b` (landmark rows and columns are sampled with a fixed seed when
+/// `r < min(n, m)`). The function then alternately rescales the rows of `Q` and the rows
+/// of `R` until the row and column marginals of `P` match `a` and `b` within `tol`.
+/// `g` stays at one.
 ///
-/// Memory: `O((n + m) * r)` instead of `O(n * m)`.
-/// Per-iteration cost: `O((n + m) * r)` instead of `O(n * m)`.
+/// This does **not** minimize transport cost. After initialization `cost` is never read
+/// again, so the result is a feasible coupling shaped by the kernel, not the entropic or
+/// low-rank optimum: even with `r = min(n, m)` its cost can exceed the full entropic
+/// Sinkhorn cost. It is not the low-rank Sinkhorn algorithm of Scetbon, Cuturi & Peyré
+/// (ICML 2021), which optimizes `Q`, `R` and `g` jointly by mirror descent with Dykstra
+/// projections.
 ///
-/// The algorithm uses Dykstra's alternating projections to enforce
-/// row and column marginal constraints on the factored coupling.
+/// The returned coupling is stored in `O((n + m) * r)` memory. Initialization and the
+/// reported `cost` read the dense `n x m` cost matrix.
 ///
 /// # Arguments
 ///
@@ -1583,7 +1591,7 @@ impl LowRankCoupling {
 /// * `cost` - Cost matrix (n*m, row-major flat)
 /// * `reg` - Entropic regularization `epsilon > 0`
 /// * `rank` - Approximation rank `r` (1 <= r <= min(n, m))
-/// * `max_iter` - Maximum Dykstra iterations
+/// * `max_iter` - Maximum alternating scaling iterations
 /// * `tol` - Convergence tolerance on marginal error
 pub fn sinkhorn_low_rank(
     a: &[f32],
@@ -1619,17 +1627,13 @@ pub fn sinkhorn_low_rank(
     let a_norm: Vec<f32> = a.iter().map(|&x| x / (a_sum + EPSILON)).collect();
     let b_norm: Vec<f32> = b.iter().map(|&x| x / (b_sum + EPSILON)).collect();
 
-    // Precompute the Gibbs kernel K_ij = exp(-C_ij / reg) in factored form.
+    // Strategy:
+    //   1. Pick `rank` landmark indices from each side.
+    //   2. Seed Q and R from the corresponding columns and rows of the Gibbs kernel.
+    //   3. Alternately rescale rows of Q (row marginals) and rows of R (column marginals).
     //
-    // Strategy (Scetbon et al. 2021, Section 3):
-    //   1. Pick `rank` landmark indices from each side
-    //   2. Form kernel sub-matrices as initial factors
-    //   3. Alternate: (a) Sinkhorn row-scaling on Q using kernel-weighted R sums,
-    //      (b) Sinkhorn col-scaling on R using kernel-weighted Q sums
-    //   4. g balances the two factors
-    //
-    // The kernel weighting in the projections ensures cost minimization, not just
-    // marginal feasibility.
+    // The cost enters only through the seed in step 2; the scaling steps never read it,
+    // so the result is marginal-feasible but not cost-minimizing, and g stays at one.
     use rand::SeedableRng;
     use rand_chacha::ChaCha8Rng;
     use rand_distr::{Distribution, Uniform};
@@ -1676,7 +1680,7 @@ pub fn sinkhorn_low_rank(
 
     let g = vec![1.0f32; rank];
 
-    // Alternating Sinkhorn projections on the low-rank factors.
+    // Alternating row/column scaling of the low-rank factors (marginal feasibility only).
     //
     // The coupling is P = Q diag(g) R^T. We enforce:
     //   Row marginals: (Q diag(g) R^T) 1_m = a
@@ -3013,8 +3017,9 @@ mod tests {
     }
 
     #[test]
-    fn low_rank_full_rank_approximates_sinkhorn() {
-        // With rank = min(n,m), low-rank should closely match full Sinkhorn.
+    fn low_rank_full_rank_cost_same_order_as_sinkhorn() {
+        // Loose sanity bound only: the low-rank routine does not minimize cost, so even at
+        // rank = min(n, m) it does not reproduce the entropic Sinkhorn cost.
         let n = 4;
         let a_arr = array![0.25, 0.25, 0.25, 0.25];
         let b_arr = array![0.1, 0.3, 0.4, 0.2];
@@ -3038,11 +3043,61 @@ mod tests {
         let ratio = lr.cost / full_cost;
         assert!(
             (0.5..2.0).contains(&ratio),
-            "full-rank low-rank cost ({}) should approximate sinkhorn_log cost ({}), ratio={}",
+            "full-rank low-rank cost ({}) should be within 2x of sinkhorn_log cost ({}), ratio={}",
             lr.cost,
             full_cost,
             ratio
         );
+    }
+
+    #[test]
+    fn low_rank_output_is_marginal_feasible_coupling() {
+        // Pins the documented contract: for every rank, the dense coupling is nonnegative,
+        // its marginals match `a` and `b`, and `cost` equals <C, P>. Optimality is not
+        // part of the contract and is deliberately not asserted.
+        let n = 6;
+        let m = 5;
+        let a: Vec<f32> = {
+            let raw = [1.0, 2.0, 3.0, 2.0, 1.0, 1.0];
+            let s: f32 = raw.iter().sum();
+            raw.iter().map(|&x| x / s).collect()
+        };
+        let b: Vec<f32> = {
+            let raw = [2.0, 1.0, 1.0, 3.0, 1.0];
+            let s: f32 = raw.iter().sum();
+            raw.iter().map(|&x| x / s).collect()
+        };
+        let cost = flat_cost(n, m);
+
+        for rank in 1..=n.min(m) {
+            let lr = sinkhorn_low_rank(&a, &b, &cost, 0.5, rank, 2_000, 1e-7).unwrap();
+            let p = lr.to_dense();
+            assert!(p.iter().all(|&v| v >= 0.0), "rank {rank}: negative entry");
+
+            for i in 0..n {
+                let row: f32 = (0..m).map(|j| p[i * m + j]).sum();
+                assert!(
+                    (row - a[i]).abs() < 1e-4,
+                    "rank {rank}: row {i} sums to {row}, expected {}",
+                    a[i]
+                );
+            }
+            for j in 0..m {
+                let col: f32 = (0..n).map(|i| p[i * m + j]).sum();
+                assert!(
+                    (col - b[j]).abs() < 1e-4,
+                    "rank {rank}: col {j} sums to {col}, expected {}",
+                    b[j]
+                );
+            }
+
+            let dense_cost: f32 = p.iter().zip(&cost).map(|(&pij, &c)| pij * c).sum();
+            assert!(
+                (lr.cost - dense_cost).abs() < 1e-4 * dense_cost.max(1.0),
+                "rank {rank}: reported cost {} != <C, P> {dense_cost}",
+                lr.cost
+            );
+        }
     }
 
     #[test]

@@ -12,6 +12,16 @@ These source changes are not assigned to a package release here.
 
 ## [Unreleased]
 
+### Documentation
+
+- `sinkhorn_low_rank` is now documented as what it computes: a
+  marginal-feasible rank-`r` coupling seeded from the Gibbs kernel. Its scaling
+  iterations never read the cost after initialization, so it does not minimize
+  transport cost and is not the Scetbon, Cuturi & Peyré (2021) algorithm; the
+  claims about Dykstra projections and cost minimization are removed. A test
+  now pins the documented contract (nonnegative coupling, matching marginals,
+  `cost` equal to `<C, P>`). Numerical behavior and public APIs are unchanged.
+
 ## [0.2.4] - 2026-10-30
 
 ### Fixed
