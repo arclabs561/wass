@@ -12,6 +12,8 @@ These source changes are not assigned to a package release here.
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-10-30
+
 ### Fixed
 
 - `unbalanced_sinkhorn_divergence_same_support` and
