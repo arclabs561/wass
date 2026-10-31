@@ -12,6 +12,13 @@ These source changes are not assigned to a package release here.
 
 ## [Unreleased]
 
+### Fixed
+
+- `unbalanced_sinkhorn_divergence_same_support` and
+  `unbalanced_sinkhorn_divergence_general` added `0.5 * eps * (m(a) - m(b))^2`
+  on top of a dual expression that already contains it, overstating the
+  divergence whenever the masses differ.
+
 ### Documentation
 
 - Fix the sign of the entropic regularizer in the Sinkhorn and Gromov-Wasserstein

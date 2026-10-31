@@ -1271,8 +1271,9 @@ pub fn unbalanced_sinkhorn_divergence_same_support(
         term_b += bj * (scale as f64) * (x as f64);
     }
 
-    let mass_corr = 0.5 * eps * (a.sum() - b.sum()).powi(2);
-    Ok((term_a + term_b) as f32 + mass_corr)
+    // The dual expression already includes 0.5 * eps * (m(a) - m(b))^2
+    // (Séjourné et al. 2019; GeomLoss); adding it again double-counts it.
+    Ok((term_a + term_b) as f32)
 }
 
 /// Unbalanced Sinkhorn divergence for different supports.
@@ -1284,6 +1285,9 @@ pub fn unbalanced_sinkhorn_divergence_same_support(
 ///
 /// Computes the debiased divergence:
 /// S(a,b) = OT(a,b) - 0.5*OT(a,a) - 0.5*OT(b,b) + 0.5*ε*(m(a)-m(b))²
+///
+/// It is evaluated from dual potentials, whose expression already contains
+/// the mass term.
 #[allow(clippy::too_many_arguments)]
 pub fn unbalanced_sinkhorn_divergence_general(
     a: &Array1<f32>,
@@ -1450,8 +1454,9 @@ pub fn unbalanced_sinkhorn_divergence_general(
         term_b += bj * (scale as f64) * (x as f64);
     }
 
-    let mass_corr = 0.5 * eps * (a.sum() - b.sum()).powi(2);
-    Ok((term_a + term_b) as f32 + mass_corr)
+    // The dual expression already includes 0.5 * eps * (m(a) - m(b))^2
+    // (Séjourné et al. 2019; GeomLoss); adding it again double-counts it.
+    Ok((term_a + term_b) as f32)
 }
 
 /// Low-rank factorized transport coupling: `P = Q * diag(g) * R^T`.
