@@ -7,7 +7,7 @@ Optimal transport distances.
 
 ## Problem
 
-You have two distributions (point clouds, histograms, token sequences) and need to measure how far apart they are, or find the cheapest way to move mass from one to the other. Optimal transport gives a principled answer: the minimum-cost coupling between the two. This library provides the algorithms.
+You have two distributions (point clouds, histograms, token sequences) and need to measure how far apart they are, or find the cheapest way to move mass from one to the other. Optimal transport answers both with the minimum-cost coupling between them.
 
 ## Examples
 
@@ -25,12 +25,15 @@ Aligning with Unbalanced Sinkhorn (epsilon=0.1)
 Rho    Divergence Interpretation
 ------------------------------------------------------------
 0.5    0.3150     Ignores outliers
+  plan_mass=0.794  deleted_src=0.216  unused_tgt=0.215
+
   credible matches (p>=0.02, dist<=0.70):
-    quarterly       -> qarterly         p=0.12  dist=0.38
-    earnings        -> earnigns         p=0.10  dist=0.49
-    showed          -> showd            p=0.10  dist=0.50
-    growth          -> grwth            p=0.10  dist=0.48
-    sectors         -> sectrs           p=0.11  dist=0.43
+    quarterly       -> qarterly         p=0.12  dist=0.38  w_src=0.163 w_tgt=0.145
+    earnings        -> earnigns         p=0.10  dist=0.49  w_src=0.163 w_tgt=0.145
+    showed          -> showd            p=0.10  dist=0.50  w_src=0.163 w_tgt=0.145
+    steady          -> stdy             p=0.08  dist=0.60  w_src=0.163 w_tgt=0.145
+    growth          -> grwth            p=0.10  dist=0.48  w_src=0.163 w_tgt=0.145
+    sectors         -> sectrs           p=0.11  dist=0.43  w_src=0.163 w_tgt=0.145
 ```
 
 **Structure-preserving graph matching**. Gromov-Wasserstein aligns two metric spaces by their internal distance structure, without requiring them to share a common embedding:
@@ -57,10 +60,10 @@ cargo run --example barycenter_morph
 |---|---|
 | `wasserstein_1d` | W1 between histograms on shared, unit-spaced bins, O(n) |
 | `sinkhorn` / `sinkhorn_log` | Entropy-regularized OT (log-domain for stability) |
-| `sinkhorn_divergence_*` | Debiased Sinkhorn divergences (positive, symmetric) |
+| `sinkhorn_divergence_*` | Debiased Sinkhorn divergences (nonnegative, symmetric) |
 | `unbalanced_sinkhorn_*` | Robust OT for partial matching and outliers |
 | `euclidean_cost_matrix` | L2 cost matrix from point clouds |
-| `sq_euclidean_cost_matrix` | Squared L2 cost (correct for W2 OT-CFM) |
+| `sq_euclidean_cost_matrix` | Squared L2 cost (the ground cost for W2) |
 | `sliced_wasserstein` | High-dimensional approximation via random projections |
 | `gromov::gromov_wasserstein` | Structure-preserving matching across metric spaces |
 | `semidiscrete::fit_potentials_sgd_neg_dot` | Semidiscrete OT via SGD on dual potentials |
@@ -96,10 +99,8 @@ let (plan, dist, iters) = sinkhorn_log_with_convergence(
 ## Tests
 
 ```bash
-cargo test -p wass
+cargo test
 ```
-
-Tests cover Sinkhorn convergence, transport plan marginal validity, divergence properties (symmetry, non-negativity, convexity, cost-shift invariance), unbalanced OT, Gromov-Wasserstein, sparse transport, semidiscrete OT, flow drift, and EMD.
 
 `tests/rosetta_wass*.rs` compare `sinkhorn`, `sinkhorn_log` and the debiased Sinkhorn divergence against fixtures generated with [POT](https://pythonot.github.io/) (Python Optimal Transport), the reference library for these solvers in Python.
 
