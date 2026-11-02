@@ -12,6 +12,8 @@ These source changes are not assigned to a package release here.
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-11-02
+
 ### Documentation
 
 - `sinkhorn_low_rank` is now documented as what it computes: a
