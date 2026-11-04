@@ -75,7 +75,7 @@ cargo run --example barycenter_morph
 
 ```toml
 [dependencies]
-wass = "0.2"
+wass = "0.3"
 ndarray = "0.16"
 ```
 
