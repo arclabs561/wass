@@ -12,6 +12,16 @@ These source changes are not assigned to a package release here.
 
 ## [Unreleased]
 
+### Fixed
+
+- `unbalanced_sinkhorn_divergence_same_support` and
+  `unbalanced_sinkhorn_divergence_general` return
+  `Error::SinkhornNotConverged` when the dual potentials do not reach `tol`
+  within `max_iter` iterations, as the balanced divergences do. They
+  previously returned a value from the unconverged potentials, so
+  `wfr_distance`, documented to error on non-convergence, returned
+  `Ok(0.258)` after one iteration with `tol = 1e-9`.
+
 ## [0.2.5] - 2026-11-02
 
 ### Documentation

@@ -1139,6 +1139,9 @@ pub fn unbalanced_sinkhorn_log_with_convergence(
 /// Unbalanced Sinkhorn divergence for measures on the same support.
 ///
 /// This mirrors `sinkhorn_divergence_same_support` but uses unbalanced OT subproblems.
+///
+/// Returns [`Error::SinkhornNotConverged`] if the dual potentials do not
+/// settle within `tol` in `max_iter` iterations.
 pub fn unbalanced_sinkhorn_divergence_same_support(
     a: &Array1<f32>,
     b: &Array1<f32>,
@@ -1212,6 +1215,7 @@ pub fn unbalanced_sinkhorn_divergence_same_support(
     let mut g_bb = damping * softmin_xy(eps, cost, &b_log);
 
     let check_every = 10usize;
+    let mut converged = false;
     for iter in 0..max_iter {
         let h_b = &b_log + &(g_ab.mapv(|x| x / eps));
         let h_a = &a_log + &(f_ba.mapv(|x| x / eps));
@@ -1246,9 +1250,13 @@ pub fn unbalanced_sinkhorn_divergence_same_support(
                 max_diff = max_diff.max((g_bb[j] - gt_bb[j]).abs());
             }
             if max_diff < tol {
+                converged = true;
                 break;
             }
         }
+    }
+    if !converged {
+        return Err(Error::SinkhornNotConverged(max_iter));
     }
 
     let scale = rho + eps / 2.0;
@@ -1288,6 +1296,9 @@ pub fn unbalanced_sinkhorn_divergence_same_support(
 ///
 /// It is evaluated from dual potentials, whose expression already contains
 /// the mass term.
+///
+/// Returns [`Error::SinkhornNotConverged`] if the dual potentials do not
+/// settle within `tol` in `max_iter` iterations.
 #[allow(clippy::too_many_arguments)]
 pub fn unbalanced_sinkhorn_divergence_general(
     a: &Array1<f32>,
@@ -1385,6 +1396,7 @@ pub fn unbalanced_sinkhorn_divergence_general(
     let mut g_bb = damping * softmin_cols(eps, cost_bb, &b_log); // cost_bb is square symmetric usually, but treat generically
 
     let check_every = 10usize;
+    let mut converged = false;
     for iter in 0..max_iter {
         // Update potentials for (a,b)
         let h_b = &b_log + &(g_ab.mapv(|x| x / eps));
@@ -1425,9 +1437,13 @@ pub fn unbalanced_sinkhorn_divergence_general(
                 max_diff = max_diff.max((g_bb[j] - gt_bb[j]).abs());
             }
             if max_diff < tol {
+                converged = true;
                 break;
             }
         }
+    }
+    if !converged {
+        return Err(Error::SinkhornNotConverged(max_iter));
     }
 
     let scale = rho + eps / 2.0;
