@@ -49,3 +49,15 @@
 ```sh
 cargo run -p wass --example <name>
 ```
+
+## Shared helpers
+
+`examples/common/textish.rs` holds the token normalization and embedding
+helpers used by `document_alignment_demo` and `noisy_ocr_matching`. It is
+example-only code, not public API.
+
+## Correctness checks
+
+Checks against a known answer live in `tests/`, not here, so `cargo test` runs
+them. For example, `tests/ot_validation.rs` compares `wasserstein_1d`,
+`earth_mover_distance`, and `sinkhorn_log` with the exact 1D W1.
