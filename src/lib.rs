@@ -150,6 +150,12 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 const EPSILON: f32 = 1e-7;
 
+// Even two finite f32 weights can overflow an f32 sum. Divide in f64
+// before narrowing so tiny positive totals normalize to unit mass too.
+fn mass_sum<'a>(weights: impl IntoIterator<Item = &'a f32>) -> f64 {
+    weights.into_iter().map(|&x| f64::from(x)).sum()
+}
+
 /// Numerically stable \(\log \sum_i \exp(x_i)\) for an indexable family.
 ///
 /// This is the classic "log-sum-exp trick":
@@ -202,15 +208,15 @@ fn entropic_ot_value(
     b: &Array1<f32>,
     reg: f32,
 ) -> f32 {
-    let a_sum = a.sum() + EPSILON;
-    let b_sum = b.sum() + EPSILON;
+    let a_sum = mass_sum(a);
+    let b_sum = mass_sum(b);
     let mut kl: f64 = 0.0;
     for ((i, j), &p) in plan.indexed_iter() {
         if p <= 0.0 {
             continue;
         }
         let p = p as f64;
-        let q = (a[i] / a_sum) as f64 * (b[j] / b_sum) as f64;
+        let q = (f64::from(a[i]) / a_sum) * (f64::from(b[j]) / b_sum);
         kl += p * (p / q).ln();
     }
     transport_cost + reg * kl as f32
@@ -790,10 +796,10 @@ pub fn sinkhorn_log(
     let n = b.len();
 
     // Normalize input distributions to ensure they sum to 1
-    let a_sum = a.sum();
-    let b_sum = b.sum();
-    let a = a / (a_sum + EPSILON);
-    let b = b / (b_sum + EPSILON);
+    let a_sum = mass_sum(a);
+    let b_sum = mass_sum(b);
+    let a = a.mapv(|x| (f64::from(x) / a_sum) as f32);
+    let b = b.mapv(|x| (f64::from(x) / b_sum) as f32);
 
     // Treat exact zeros as -∞ (hard support exclusion) to avoid +∞ - (-∞) style NaNs.
     // This also makes plan entries involving zero-mass bins go to exactly 0.
@@ -857,13 +863,13 @@ pub fn sinkhorn_log_with_convergence(
 
     // Normalize input distributions to ensure they sum to 1.
     // (This matches the rest of this crate; callers can enforce strict normalization upstream.)
-    let a_sum = a.sum();
-    let b_sum = b.sum();
+    let a_sum = mass_sum(a);
+    let b_sum = mass_sum(b);
     if a_sum <= 0.0 || b_sum <= 0.0 {
         return Err(Error::Domain("sinkhorn requires positive total mass"));
     }
-    let a = a / (a_sum + EPSILON);
-    let b = b / (b_sum + EPSILON);
+    let a = a.mapv(|x| (f64::from(x) / a_sum) as f32);
+    let b = b.mapv(|x| (f64::from(x) / b_sum) as f32);
 
     // Consistent with `sinkhorn_log`: treat exact zeros as hard support exclusion.
     // This matters for correctness when users pass sparse histograms.
@@ -1633,15 +1639,15 @@ pub fn sinkhorn_low_rank(
     if a.iter().any(|&x| x < 0.0) || b.iter().any(|&x| x < 0.0) {
         return Err(Error::Domain("sinkhorn requires nonnegative masses"));
     }
-    let a_sum: f32 = a.iter().sum();
-    let b_sum: f32 = b.iter().sum();
+    let a_sum = mass_sum(a);
+    let b_sum = mass_sum(b);
     if a_sum <= 0.0 || b_sum <= 0.0 {
         return Err(Error::Domain("sinkhorn requires positive total mass"));
     }
 
     // Normalize inputs.
-    let a_norm: Vec<f32> = a.iter().map(|&x| x / (a_sum + EPSILON)).collect();
-    let b_norm: Vec<f32> = b.iter().map(|&x| x / (b_sum + EPSILON)).collect();
+    let a_norm: Vec<f32> = a.iter().map(|&x| (f64::from(x) / a_sum) as f32).collect();
+    let b_norm: Vec<f32> = b.iter().map(|&x| (f64::from(x) / b_sum) as f32).collect();
 
     // Strategy:
     //   1. Pick `rank` landmark indices from each side.
