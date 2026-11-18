@@ -47,3 +47,52 @@ fn sinkhorn_log_with_convergence_respects_zero_mass_support() {
     assert!(plan[[1, 2]].abs() < 1e-6);
     assert!(plan[[2, 2]].abs() < 1e-6);
 }
+
+#[test]
+fn balanced_marginals_are_independent_of_input_units() {
+    let cost = array![[1.0, 1.0], [1.0, 1.0]];
+    for mass in [1e-15, f32::MAX] {
+        let a = array![mass, mass];
+        let b = array![mass, 0.0];
+        let (unchecked, _) = wass::sinkhorn_log(&a, &b, &cost, 0.5, 20);
+        let (checked, _, _) =
+            wass::sinkhorn_log_with_convergence(&a, &b, &cost, 0.5, 20, 1e-5).unwrap();
+        for plan in [unchecked, checked] {
+            assert!((plan[[0, 0]] - 0.5).abs() < 1e-5, "{plan}");
+            assert!((plan[[1, 0]] - 0.5).abs() < 1e-5, "{plan}");
+            assert_eq!(plan.column(1).sum(), 0.0);
+        }
+    }
+}
+
+#[test]
+fn low_rank_and_entropic_value_use_the_normalized_weights() {
+    let cost = array![[0.0, 1.0], [1.0, 0.0]];
+    let reference = wass::sinkhorn_divergence_same_support(
+        &array![0.5, 0.5],
+        &array![1.0, 0.0],
+        &cost,
+        0.5,
+        100,
+        1e-5,
+    )
+    .unwrap();
+    for mass in [1e-15, f32::MAX] {
+        let value = wass::sinkhorn_divergence_same_support(
+            &array![mass, mass],
+            &array![mass, 0.0],
+            &cost,
+            0.5,
+            100,
+            1e-5,
+        )
+        .unwrap();
+        assert!((value - reference).abs() < 1e-5);
+        let low =
+            wass::sinkhorn_low_rank(&[mass, mass], &[mass, mass], &[0.0; 4], 0.5, 1, 100, 1e-5)
+                .unwrap();
+        for p in low.to_dense() {
+            assert!((p - 0.25).abs() < 1e-5);
+        }
+    }
+}
