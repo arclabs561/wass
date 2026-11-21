@@ -4,6 +4,7 @@
 
 | I want to...                                | Example                                                          |
 |---------------------------------------------|------------------------------------------------------------------|
+| Solve a saved rectangular cost matrix       | `cost_matrix`                                                    |
 | Compare two histograms on the same bins     | `sinkhorn_divergence_same_support`                               |
 | Compare documents with word movers distance | `document_distance`                                              |
 | Align documents or noisy text               | `document_alignment_demo`, `noisy_ocr_matching`                  |
@@ -15,6 +16,24 @@
 | Register (align) two 2D point clouds        | `point_cloud_registration`                                       |
 | Compare clusters without collapsing shape   | `ot_clustering`                                                  |
 | Average / morph distributions (barycenter)  | `barycenter_morph`                                               |
+
+## Bring your own cost matrix
+
+Pipe one problem to `cost_matrix`. Rows correspond to source masses `a`,
+columns to target masses `b`. The balanced solver normalizes each side to
+total mass one. In this example the sole source sends three quarters to the
+first target for free and one quarter to the second at cost four:
+
+```sh
+printf '%s\n' '{"a":[1],"b":[3,1],"cost":[[0,4]],"reg":1}' > problem.json
+cargo run --example cost_matrix < problem.json
+```
+
+The printed plan is `[[0.75, 0.25]]` and its transport cost is 1. This cost is
+the sum of mass times cost over the plan. The entropy penalty controls the
+plan through `reg` and is excluded from the printed cost. The example uses
+`sinkhorn_log_with_convergence` with a marginal tolerance of 1e-6 and a
+2,000-iteration limit.
 
 ## Example descriptions
 

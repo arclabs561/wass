@@ -48,6 +48,8 @@ cargo run --example gromov_wasserstein_graph_match
 cargo run --example sparse_vs_sinkhorn
 ```
 
+To solve a saved problem, pipe the two mass vectors and their cost matrix into the [cost-matrix example](examples/README.md#bring-your-own-cost-matrix).
+
 **Barycenters (the OT "average")**. The Wasserstein barycenter is not the pointwise average: it moves mass along the geometry. The example morphs a square into a circle with the free-support barycenter, and shows the fixed-support barycenter of two humps landing as one hump between them (where the naive average keeps both):
 
 ```bash
