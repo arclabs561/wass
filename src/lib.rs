@@ -150,6 +150,12 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 const EPSILON: f32 = 1e-7;
 
+// Even two finite f32 weights can overflow an f32 sum. Divide in f64
+// before narrowing so tiny positive totals normalize to unit mass too.
+fn mass_sum<'a>(weights: impl IntoIterator<Item = &'a f32>) -> f64 {
+    weights.into_iter().map(|&x| f64::from(x)).sum()
+}
+
 /// Numerically stable \(\log \sum_i \exp(x_i)\) for an indexable family.
 ///
 /// This is the classic "log-sum-exp trick":
@@ -754,6 +760,29 @@ pub fn sq_euclidean_cost_matrix(x: &Array2<f32>, y: &Array2<f32>) -> Array2<f32>
     cost
 }
 
+// Subtracting a constant from a cost row leaves its balanced plan unchanged.
+// Keep zero as the offset on rows spanning both signs to avoid overflow.
+fn row_cost_offsets(cost: &Array2<f32>) -> Vec<f32> {
+    cost.rows()
+        .into_iter()
+        .map(|row| {
+            let mut lo = f32::INFINITY;
+            let mut hi = f32::NEG_INFINITY;
+            for &value in row {
+                if value.is_finite() {
+                    lo = lo.min(value);
+                    hi = hi.max(value);
+                }
+            }
+            if lo > hi {
+                0.0
+            } else {
+                0.0_f32.clamp(lo, hi)
+            }
+        })
+        .collect()
+}
+
 /// Log-domain Sinkhorn algorithm for entropic optimal transport.
 ///
 /// Solves the same problem as [`sinkhorn`] but in log-space, avoiding the
@@ -790,10 +819,13 @@ pub fn sinkhorn_log(
     let n = b.len();
 
     // Normalize input distributions to ensure they sum to 1
-    let a_sum = a.sum();
-    let b_sum = b.sum();
-    let a = a / (a_sum + EPSILON);
-    let b = b / (b_sum + EPSILON);
+    let a_sum = mass_sum(a);
+    let b_sum = mass_sum(b);
+    let a = a.mapv(|x| (f64::from(x) / a_sum) as f32);
+    let b = b.mapv(|x| (f64::from(x) / b_sum) as f32);
+
+    let offsets = row_cost_offsets(cost);
+    let centered = |i: usize, j: usize| cost[[i, j]] - offsets[i];
 
     // Treat exact zeros as -∞ (hard support exclusion) to avoid +∞ - (-∞) style NaNs.
     // This also makes plan entries involving zero-mass bins go to exactly 0.
@@ -806,13 +838,13 @@ pub fn sinkhorn_log(
     for _ in 0..max_iter {
         // Update f: f_i = ε * log(a_i) - ε * logsumexp_j((g_j - C_ij) / ε)
         for i in 0..m {
-            let lse = logsumexp_by(n, |j| (g[j] - cost[[i, j]]) / reg);
+            let lse = logsumexp_by(n, |j| (g[j] - centered(i, j)) / reg);
             f[i] = reg * (log_a[i] - lse);
         }
 
         // Update g: g_j = ε * log(b_i) - ε * logsumexp_i((f_i - C_ij) / ε)
         for j in 0..n {
-            let lse = logsumexp_by(m, |i| (f[i] - cost[[i, j]]) / reg);
+            let lse = logsumexp_by(m, |i| (f[i] - centered(i, j)) / reg);
             g[j] = reg * (log_b[j] - lse);
         }
     }
@@ -821,7 +853,7 @@ pub fn sinkhorn_log(
     let mut distance = 0.0;
     for i in 0..m {
         for j in 0..n {
-            let log_p = (f[i] + g[j] - cost[[i, j]]) / reg;
+            let log_p = (f[i] + g[j] - centered(i, j)) / reg;
             plan[[i, j]] = log_p.exp();
             distance += plan[[i, j]] * cost[[i, j]];
         }
@@ -857,13 +889,16 @@ pub fn sinkhorn_log_with_convergence(
 
     // Normalize input distributions to ensure they sum to 1.
     // (This matches the rest of this crate; callers can enforce strict normalization upstream.)
-    let a_sum = a.sum();
-    let b_sum = b.sum();
+    let a_sum = mass_sum(a);
+    let b_sum = mass_sum(b);
     if a_sum <= 0.0 || b_sum <= 0.0 {
         return Err(Error::Domain("sinkhorn requires positive total mass"));
     }
-    let a = a / (a_sum + EPSILON);
-    let b = b / (b_sum + EPSILON);
+    let a = a.mapv(|x| (f64::from(x) / a_sum) as f32);
+    let b = b.mapv(|x| (f64::from(x) / b_sum) as f32);
+
+    let offsets = row_cost_offsets(cost);
+    let centered = |i: usize, j: usize| cost[[i, j]] - offsets[i];
 
     // Consistent with `sinkhorn_log`: treat exact zeros as hard support exclusion.
     // This matters for correctness when users pass sparse histograms.
@@ -878,46 +913,39 @@ pub fn sinkhorn_log_with_convergence(
 
     for iter in 0..max_iter {
         for i in 0..m {
-            let lse = logsumexp_by(n, |j| (g[j] - cost[[i, j]]) / reg);
+            let lse = logsumexp_by(n, |j| (g[j] - centered(i, j)) / reg);
             f[i] = reg * (log_a[i] - lse);
         }
         for j in 0..n {
-            let lse = logsumexp_by(m, |i| (f[i] - cost[[i, j]]) / reg);
+            let lse = logsumexp_by(m, |i| (f[i] - centered(i, j)) / reg);
             g[j] = reg * (log_b[j] - lse);
         }
 
         if (iter + 1) % check_every == 0 || iter + 1 == max_iter {
-            // max marginal error: compute row/col sums from current (f,g).
-            // Combine exponents before `exp`: exp(f_i/reg) alone overflows f32
-            // once C/reg exceeds ~88, and inf * 0 = NaN would then be dropped by
-            // `f32::max`, reporting convergence on a garbage plan.
-            let mut max_err = 0.0f32;
+            // Verify the entries that will actually be returned. Equivalent
+            // rearrangements of the duals can round to different marginals.
+            let mut plan = Array2::zeros((m, n));
+            let mut cols = vec![0.0; n];
+            let mut max_err = 0.0;
+            let mut distance = 0.0;
             for i in 0..m {
-                // row_sum = exp(f_i/reg + LSE_j((g_j - C_ij)/reg))
-                let lse = logsumexp_by(n, |j| (g[j] - cost[[i, j]]) / reg);
-                let row_sum = (f[i] / reg + lse).exp();
+                let mut row_sum = 0.0;
+                for j in 0..n {
+                    let pij = ((f[i] + g[j] - centered(i, j)) / reg).exp();
+                    plan[[i, j]] = pij;
+                    row_sum += pij;
+                    cols[j] += pij;
+                    distance += pij * cost[[i, j]];
+                }
                 max_err = nan_max(max_err, (row_sum - a[i]).abs());
             }
             for j in 0..n {
-                let lse = logsumexp_by(m, |i| (f[i] - cost[[i, j]]) / reg);
-                let col_sum = (g[j] / reg + lse).exp();
-                max_err = nan_max(max_err, (col_sum - b[j]).abs());
+                max_err = nan_max(max_err, (cols[j] - b[j]).abs());
             }
             if max_err.is_nan() {
                 return Err(Error::Domain("sinkhorn marginal error is NaN"));
             }
             if max_err < tol {
-                // Build plan once at the end.
-                let mut plan = Array2::zeros((m, n));
-                let mut distance = 0.0;
-                for i in 0..m {
-                    for j in 0..n {
-                        let log_p = (f[i] + g[j] - cost[[i, j]]) / reg;
-                        let pij = log_p.exp();
-                        plan[[i, j]] = pij;
-                        distance += pij * cost[[i, j]];
-                    }
-                }
                 return Ok((plan, distance, iter + 1));
             }
         }
@@ -2443,6 +2471,20 @@ mod tests {
     use super::*;
     use ndarray::array;
     use proptest::prelude::*;
+
+    #[test]
+    fn balanced_log_plan_is_invariant_to_large_cost_offsets() {
+        let a = ndarray::array![1.0];
+        let b = ndarray::array![1.0, 1.0];
+        for offset in [-1e8_f32, 0.0, 1e8] {
+            let costs = ndarray::array![[offset, offset]];
+            let (plan, cost, _) =
+                sinkhorn_log_with_convergence(&a, &b, &costs, 1.0, 100, 1e-6).unwrap();
+            assert_eq!(plan, ndarray::array![[0.5, 0.5]]);
+            assert_eq!(cost, offset);
+            assert_eq!(sinkhorn_log(&a, &b, &costs, 1.0, 100), (plan, cost));
+        }
+    }
 
     #[test]
     fn test_wasserstein_1d_same() {

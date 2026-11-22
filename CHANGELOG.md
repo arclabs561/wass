@@ -12,6 +12,12 @@ These source changes are not assigned to a package release here.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-22
+
+### Fixed
+
+- Balanced log-domain Sinkhorn checks the returned plan’s marginals and removes row offsets during optimization. Large constant costs preserve unit mass. Both log-domain entry points normalize finite input masses in double precision.
+
 ## [0.3.0] - 2026-11-04
 
 ### Fixed
