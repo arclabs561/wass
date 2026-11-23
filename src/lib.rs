@@ -760,27 +760,34 @@ pub fn sq_euclidean_cost_matrix(x: &Array2<f32>, y: &Array2<f32>) -> Array2<f32>
     cost
 }
 
-// Subtracting a constant from a cost row leaves its balanced plan unchanged.
-// Keep zero as the offset on rows spanning both signs to avoid overflow.
-fn row_cost_offsets(cost: &Array2<f32>) -> Vec<f32> {
-    cost.rows()
+// Balanced marginals make a constant per row or column immaterial to the plan.
+fn cost_offset(values: impl Iterator<Item = f32>) -> f32 {
+    let mut lo = f32::INFINITY;
+    let mut hi = f32::NEG_INFINITY;
+    for value in values.filter(|v| v.is_finite()) {
+        lo = lo.min(value);
+        hi = hi.max(value);
+    }
+    // Choose the closest endpoint to zero so subtraction cannot overflow.
+    if lo <= hi {
+        0.0_f32.clamp(lo, hi)
+    } else {
+        0.0
+    }
+}
+
+fn cost_offsets(cost: &Array2<f32>) -> (Vec<f32>, Vec<f32>) {
+    let rows: Vec<_> = cost
+        .rows()
         .into_iter()
-        .map(|row| {
-            let mut lo = f32::INFINITY;
-            let mut hi = f32::NEG_INFINITY;
-            for &value in row {
-                if value.is_finite() {
-                    lo = lo.min(value);
-                    hi = hi.max(value);
-                }
-            }
-            if lo > hi {
-                0.0
-            } else {
-                0.0_f32.clamp(lo, hi)
-            }
-        })
-        .collect()
+        .map(|row| cost_offset(row.iter().copied()))
+        .collect();
+    let cols = cost
+        .columns()
+        .into_iter()
+        .map(|col| cost_offset(col.iter().zip(&rows).map(|(&c, offset)| c - offset)))
+        .collect();
+    (rows, cols)
 }
 
 /// Log-domain Sinkhorn algorithm for entropic optimal transport.
@@ -824,8 +831,8 @@ pub fn sinkhorn_log(
     let a = a.mapv(|x| (f64::from(x) / a_sum) as f32);
     let b = b.mapv(|x| (f64::from(x) / b_sum) as f32);
 
-    let offsets = row_cost_offsets(cost);
-    let centered = |i: usize, j: usize| cost[[i, j]] - offsets[i];
+    let (rows, cols) = cost_offsets(cost);
+    let centered = |i: usize, j: usize| cost[[i, j]] - rows[i] - cols[j];
 
     // Treat exact zeros as -∞ (hard support exclusion) to avoid +∞ - (-∞) style NaNs.
     // This also makes plan entries involving zero-mass bins go to exactly 0.
@@ -897,8 +904,8 @@ pub fn sinkhorn_log_with_convergence(
     let a = a.mapv(|x| (f64::from(x) / a_sum) as f32);
     let b = b.mapv(|x| (f64::from(x) / b_sum) as f32);
 
-    let offsets = row_cost_offsets(cost);
-    let centered = |i: usize, j: usize| cost[[i, j]] - offsets[i];
+    let (rows, cols) = cost_offsets(cost);
+    let centered = |i: usize, j: usize| cost[[i, j]] - rows[i] - cols[j];
 
     // Consistent with `sinkhorn_log`: treat exact zeros as hard support exclusion.
     // This matters for correctness when users pass sparse histograms.
@@ -2471,6 +2478,20 @@ mod tests {
     use super::*;
     use ndarray::array;
     use proptest::prelude::*;
+
+    #[test]
+    fn balanced_log_column_costs_preserve_both_marginals() {
+        let a = ndarray::array![1.0];
+        let b = ndarray::array![1.0, 1.0];
+        for c in [1e8, -1e8] {
+            let costs = ndarray::array![[0.0, c]];
+            let expected = (ndarray::array![[0.5, 0.5]], c * 0.5);
+            assert_eq!(sinkhorn_log(&a, &b, &costs, 1.0, 100), expected);
+            let (plan, distance, _) =
+                sinkhorn_log_with_convergence(&a, &b, &costs, 1.0, 100, 1e-6).unwrap();
+            assert_eq!((plan, distance), expected);
+        }
+    }
 
     #[test]
     fn balanced_log_plan_is_invariant_to_large_cost_offsets() {
