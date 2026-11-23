@@ -760,34 +760,138 @@ pub fn sq_euclidean_cost_matrix(x: &Array2<f32>, y: &Array2<f32>) -> Array2<f32>
     cost
 }
 
-// Balanced marginals make a constant per row or column immaterial to the plan.
-fn cost_offset(values: impl Iterator<Item = f32>) -> f32 {
-    let mut lo = f32::INFINITY;
-    let mut hi = f32::NEG_INFINITY;
-    for value in values.filter(|v| v.is_finite()) {
-        lo = lo.min(value);
-        hi = hi.max(value);
+// Work only on the positive-mass support. Row and column constants change
+// the objective by a fixed amount, so the transport plan is unchanged.
+struct BalancedSinkhorn<'a> {
+    cost: &'a Array2<f32>,
+    a: Array1<f64>,
+    b: Array1<f64>,
+    log_a: Array1<f64>,
+    log_b: Array1<f64>,
+    row_offset: Vec<f64>,
+    col_offset: Vec<(f64, f64)>,
+    f: Array1<f64>,
+    g: Array1<f64>,
+    reg: f64,
+}
+
+impl<'a> BalancedSinkhorn<'a> {
+    fn new(a: &Array1<f32>, b: &Array1<f32>, cost: &'a Array2<f32>, reg: f32) -> Self {
+        let a_sum = mass_sum(a);
+        let b_sum = mass_sum(b);
+        let a = a.mapv(|v| f64::from(v) / a_sum);
+        let b = b.mapv(|v| f64::from(v) / b_sum);
+        let min_finite = |x: f64| if x.is_finite() { x } else { 0.0 };
+        let row_offset: Vec<_> = cost
+            .rows()
+            .into_iter()
+            .map(|row| {
+                min_finite(
+                    row.iter()
+                        .zip(&b)
+                        .filter(|(c, w)| c.is_finite() && **w > 0.0)
+                        .map(|(&c, _)| f64::from(c))
+                        .fold(f64::INFINITY, f64::min),
+                )
+            })
+            .collect();
+        let col_offset = cost
+            .columns()
+            .into_iter()
+            .map(|col| {
+                col.iter()
+                    .zip(&a)
+                    .zip(&row_offset)
+                    .filter(|((&c, &w), _)| c.is_finite() && w > 0.0)
+                    .map(|((&c, _), offset)| sum_parts(f64::from(c), -offset))
+                    .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)))
+                    .unwrap_or((0.0, 0.0))
+            })
+            .collect();
+        let log_a = a.mapv(f64::ln);
+        let log_b = b.mapv(f64::ln);
+        let f = a.mapv(|x| if x == 0.0 { f64::NEG_INFINITY } else { 0.0 });
+        let g = b.mapv(|x| if x == 0.0 { f64::NEG_INFINITY } else { 0.0 });
+        Self {
+            cost,
+            a,
+            b,
+            log_a,
+            log_b,
+            row_offset,
+            col_offset,
+            f,
+            g,
+            reg: f64::from(reg),
+        }
     }
-    // Choose the closest endpoint to zero so subtraction cannot overflow.
-    if lo <= hi {
-        0.0_f32.clamp(lo, hi)
-    } else {
-        0.0
+
+    fn cost_at(&self, i: usize, j: usize) -> f64 {
+        let raw = f64::from(self.cost[[i, j]]);
+        if !raw.is_finite() {
+            return raw;
+        }
+        let (row, low) = sum_parts(raw, -self.row_offset[i]);
+        let (col, col_low) = self.col_offset[j];
+        (row - col) + (low - col_low)
+    }
+
+    fn step(&mut self) {
+        for i in 0..self.a.len() {
+            if self.a[i] > 0.0 {
+                let lse = logsumexp_wide(self.b.len(), |j| {
+                    (self.g[j] - self.cost_at(i, j)) / self.reg
+                });
+                self.f[i] = self.reg * (self.log_a[i] - lse);
+            }
+        }
+        for j in 0..self.b.len() {
+            if self.b[j] > 0.0 {
+                let lse = logsumexp_wide(self.a.len(), |i| {
+                    (self.f[i] - self.cost_at(i, j)) / self.reg
+                });
+                self.g[j] = self.reg * (self.log_b[j] - lse);
+            }
+        }
+    }
+
+    fn plan_and_cost(&self) -> (Array2<f32>, f32) {
+        let mut distance = 0.0;
+        let mut correction = 0.0;
+        let plan = Array2::from_shape_fn((self.a.len(), self.b.len()), |(i, j)| {
+            if self.a[i] == 0.0 || self.b[j] == 0.0 {
+                return 0.0;
+            }
+            let pij = (((self.f[i] - self.cost_at(i, j)) + self.g[j]) / self.reg).exp() as f32;
+            if pij != 0.0 {
+                let (next, low) =
+                    sum_parts(distance, f64::from(pij) * f64::from(self.cost[[i, j]]));
+                distance = next;
+                correction += low;
+            }
+            pij
+        });
+        (plan, (distance + correction) as f32)
     }
 }
 
-fn cost_offsets(cost: &Array2<f32>) -> (Vec<f32>, Vec<f32>) {
-    let rows: Vec<_> = cost
-        .rows()
-        .into_iter()
-        .map(|row| cost_offset(row.iter().copied()))
-        .collect();
-    let cols = cost
-        .columns()
-        .into_iter()
-        .map(|col| cost_offset(col.iter().zip(&rows).map(|(&c, offset)| c - offset)))
-        .collect();
-    (rows, cols)
+// FastTwoSum keeps the bits lost when applying a much larger gauge offset.
+fn sum_parts(a: f64, b: f64) -> (f64, f64) {
+    let sum = a + b;
+    let low = if a.abs() >= b.abs() {
+        (a - sum) + b
+    } else {
+        (b - sum) + a
+    };
+    (sum, low)
+}
+
+fn logsumexp_wide(n: usize, value: impl Fn(usize) -> f64) -> f64 {
+    let max = (0..n).map(&value).fold(f64::NEG_INFINITY, f64::max);
+    if !max.is_finite() {
+        return max;
+    }
+    max + (0..n).map(|i| (value(i) - max).exp()).sum::<f64>().ln()
 }
 
 /// Log-domain Sinkhorn algorithm for entropic optimal transport.
@@ -822,51 +926,11 @@ pub fn sinkhorn_log(
     reg: f32,
     max_iter: usize,
 ) -> (Array2<f32>, f32) {
-    let m = a.len();
-    let n = b.len();
-
-    // Normalize input distributions to ensure they sum to 1
-    let a_sum = mass_sum(a);
-    let b_sum = mass_sum(b);
-    let a = a.mapv(|x| (f64::from(x) / a_sum) as f32);
-    let b = b.mapv(|x| (f64::from(x) / b_sum) as f32);
-
-    let (rows, cols) = cost_offsets(cost);
-    let centered = |i: usize, j: usize| cost[[i, j]] - rows[i] - cols[j];
-
-    // Treat exact zeros as -∞ (hard support exclusion) to avoid +∞ - (-∞) style NaNs.
-    // This also makes plan entries involving zero-mass bins go to exactly 0.
-    let log_a = a.mapv(|x| if x <= 0.0 { f32::NEG_INFINITY } else { x.ln() });
-    let log_b = b.mapv(|x| if x <= 0.0 { f32::NEG_INFINITY } else { x.ln() });
-
-    let mut f: Array1<f32> = Array1::zeros(m);
-    let mut g: Array1<f32> = Array1::zeros(n);
-
+    let mut solver = BalancedSinkhorn::new(a, b, cost, reg);
     for _ in 0..max_iter {
-        // Update f: f_i = ε * log(a_i) - ε * logsumexp_j((g_j - C_ij) / ε)
-        for i in 0..m {
-            let lse = logsumexp_by(n, |j| (g[j] - centered(i, j)) / reg);
-            f[i] = reg * (log_a[i] - lse);
-        }
-
-        // Update g: g_j = ε * log(b_i) - ε * logsumexp_i((f_i - C_ij) / ε)
-        for j in 0..n {
-            let lse = logsumexp_by(m, |i| (f[i] - centered(i, j)) / reg);
-            g[j] = reg * (log_b[j] - lse);
-        }
+        solver.step();
     }
-
-    let mut plan = Array2::zeros((m, n));
-    let mut distance = 0.0;
-    for i in 0..m {
-        for j in 0..n {
-            let log_p = (f[i] + g[j] - centered(i, j)) / reg;
-            plan[[i, j]] = log_p.exp();
-            distance += plan[[i, j]] * cost[[i, j]];
-        }
-    }
-
-    (plan, distance)
+    solver.plan_and_cost()
 }
 
 /// Sinkhorn in log-space with a convergence check on marginal constraints.
@@ -901,63 +965,34 @@ pub fn sinkhorn_log_with_convergence(
     if a_sum <= 0.0 || b_sum <= 0.0 {
         return Err(Error::Domain("sinkhorn requires positive total mass"));
     }
-    let a = a.mapv(|x| (f64::from(x) / a_sum) as f32);
-    let b = b.mapv(|x| (f64::from(x) / b_sum) as f32);
-
-    let (rows, cols) = cost_offsets(cost);
-    let centered = |i: usize, j: usize| cost[[i, j]] - rows[i] - cols[j];
-
-    // Consistent with `sinkhorn_log`: treat exact zeros as hard support exclusion.
-    // This matters for correctness when users pass sparse histograms.
-    let log_a = a.mapv(|x| if x <= 0.0 { f32::NEG_INFINITY } else { x.ln() });
-    let log_b = b.mapv(|x| if x <= 0.0 { f32::NEG_INFINITY } else { x.ln() });
-
-    let mut f: Array1<f32> = Array1::zeros(m);
-    let mut g: Array1<f32> = Array1::zeros(n);
-
-    // Check marginals every so often; doing it every iteration is O(mn) overhead.
-    let check_every = 10usize;
-
-    for iter in 0..max_iter {
-        for i in 0..m {
-            let lse = logsumexp_by(n, |j| (g[j] - centered(i, j)) / reg);
-            f[i] = reg * (log_a[i] - lse);
-        }
-        for j in 0..n {
-            let lse = logsumexp_by(m, |i| (f[i] - centered(i, j)) / reg);
-            g[j] = reg * (log_b[j] - lse);
-        }
-
-        if (iter + 1) % check_every == 0 || iter + 1 == max_iter {
-            // Verify the entries that will actually be returned. Equivalent
-            // rearrangements of the duals can round to different marginals.
-            let mut plan = Array2::zeros((m, n));
-            let mut cols = vec![0.0; n];
-            let mut max_err = 0.0;
-            let mut distance = 0.0;
-            for i in 0..m {
-                let mut row_sum = 0.0;
-                for j in 0..n {
-                    let pij = ((f[i] + g[j] - centered(i, j)) / reg).exp();
-                    plan[[i, j]] = pij;
-                    row_sum += pij;
-                    cols[j] += pij;
-                    distance += pij * cost[[i, j]];
+    let mut solver = BalancedSinkhorn::new(a, b, cost, reg);
+    for iter in 1..=max_iter {
+        solver.step();
+        if iter % 10 == 0 || iter == max_iter {
+            let (plan, distance) = solver.plan_and_cost();
+            // Measure the rounded entries the caller actually receives.
+            let rows = plan
+                .rows()
+                .into_iter()
+                .zip(&solver.a)
+                .map(|(v, w)| (mass_sum(v) - w).abs());
+            let cols = plan
+                .columns()
+                .into_iter()
+                .zip(&solver.b)
+                .map(|(v, w)| (mass_sum(v) - w).abs());
+            let mut max_err = 0.0_f64;
+            for err in rows.chain(cols) {
+                if err.is_nan() {
+                    return Err(Error::Domain("sinkhorn marginal error is NaN"));
                 }
-                max_err = nan_max(max_err, (row_sum - a[i]).abs());
+                max_err = max_err.max(err);
             }
-            for j in 0..n {
-                max_err = nan_max(max_err, (cols[j] - b[j]).abs());
-            }
-            if max_err.is_nan() {
-                return Err(Error::Domain("sinkhorn marginal error is NaN"));
-            }
-            if max_err < tol {
-                return Ok((plan, distance, iter + 1));
+            if max_err < f64::from(tol) {
+                return Ok((plan, distance, iter));
             }
         }
     }
-
     Err(Error::SinkhornNotConverged(max_iter))
 }
 
@@ -2478,6 +2513,64 @@ mod tests {
     use super::*;
     use ndarray::array;
     use proptest::prelude::*;
+
+    #[test]
+    fn balanced_log_keeps_small_interactions_and_signed_costs() {
+        let weights = array![1.0, 1.0];
+        let base = array![[0.0, 1.0], [0.0, 2.0]];
+        let shifted = array![[-1e30, 1.0], [-1e30, 2.0]];
+        let expected = sinkhorn_log(&weights, &weights, &base, 1.0, 100).0;
+        let actual = sinkhorn_log_with_convergence(&weights, &weights, &shifted, 1.0, 100, 1e-7)
+            .unwrap()
+            .0;
+        for (p, q) in actual.iter().zip(&expected) {
+            assert!((p - q).abs() < 1e-7);
+        }
+        let (_, distance) = sinkhorn_log(
+            &array![1.0],
+            &array![1.0, 1.0, 1.0],
+            &array![[1e30, 1.0, -1e30]],
+            1.0,
+            100,
+        );
+        assert_eq!(distance, 1.0 / 3.0);
+    }
+
+    #[test]
+    fn balanced_log_reduces_offsets_only_on_active_marginals() {
+        let b = array![1.0, 1.0];
+        for magnitude in [1e8_f32, -1e8, f32::MAX] {
+            for (a, costs, expected, expected_cost) in [
+                (
+                    array![1.0, 0.0],
+                    array![[0.0, magnitude], [0.0, 0.0]],
+                    array![[0.5, 0.5], [0.0, 0.0]],
+                    magnitude * 0.5,
+                ),
+                (
+                    array![1.0, 1.0],
+                    array![[0.0, magnitude], [-magnitude, 0.0]],
+                    array![[0.25, 0.25], [0.25, 0.25]],
+                    0.0,
+                ),
+            ] {
+                for transpose in [false, true] {
+                    let (x, y, c, p) = if transpose {
+                        (&b, &a, costs.t().to_owned(), expected.t().to_owned())
+                    } else {
+                        (&a, &b, costs.clone(), expected.clone())
+                    };
+                    let (fixed, cost) = sinkhorn_log(x, y, &c, 1.0, 100);
+                    assert_eq!(fixed, p);
+                    assert_eq!(cost, expected_cost);
+                    let (checked, cost, _) =
+                        sinkhorn_log_with_convergence(x, y, &c, 1.0, 100, 1e-6).unwrap();
+                    assert_eq!(checked, p);
+                    assert_eq!(cost, expected_cost);
+                }
+            }
+        }
+    }
 
     #[test]
     fn balanced_log_column_costs_preserve_both_marginals() {
